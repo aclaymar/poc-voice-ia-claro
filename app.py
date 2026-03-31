@@ -8,12 +8,14 @@ from contexto import FAQ_CLARO
 load_dotenv()
 api_key = os.environ.get("ANTHROPIC_API_KEY")
 
-# Plano B: Caso o .env falhe, cole sua chave aqui
-if not api_key or "sk-ant" not in api_key:
-    api_key = "CHAVE_REMOVIDA_USE_ENV"
+# Se não encontrar a chave, avisa o usuário em vez de quebrar
+if not api_key:
+    print("\n[ERRO]: Variável ANTHROPIC_API_KEY não encontrada!")
+    print("Certifique-se de que o arquivo .env existe ou a variável está no PyCharm.")
 
 try:
-    client = Anthropic(api_key=api_key.strip())
+    # O .strip() limpa qualquer espaço acidental
+    client = Anthropic(api_key=api_key.strip() if api_key else "")
 except Exception as e:
     print(f"Erro ao iniciar cliente: {e}")
 
