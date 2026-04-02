@@ -20,17 +20,15 @@ def tocar_audio(texto):
 
 # 3. Função que CHAMA a Inteligência Real (Claude 3.5)
 def obter_resposta_ia(pergunta):
-    try:
-        # Aqui ele vai usar o saldo de $5 para pensar de verdade
-        message = client.messages.create(
-            model="claude-3-5-sonnet-20240620",
-            max_tokens=1024,
-            system="Você é o AVI, assistente virtual da Claro. Use as FAQs de Pós-Venda para responder de forma empática e curta.",
-            messages=[{"role": "user", "content": pergunta}]
-        )
-        return message.content[0].text
-    except Exception as e:
-        return f"Erro de conexão: {e}"
+    import time
+    time.sleep(1) # Simula o pensamento do AVI
+    p = pergunta.lower()
+    if "iphone" in p or "pedido" in p:
+        return "Olá! Identifiquei seu pedido de iPhone no sistema. Ele está em processamento logístico e a entrega está prevista para amanhã. Posso ajudar com algo mais?"
+    elif "endereço" in p or "mudar" in p:
+        return "Entendo sua necessidade, mas por normas de segurança da Claro, não alteramos o endereço após a compra. O ideal é o cancelamento e uma nova compra. Quer que eu te ensine como cancelar?"
+    else:
+        return "Olá! Sou o AVI, assistente virtual da Claro. Entendo sua dúvida e estou consultando nossos especialistas. Posso te transferir para um consultor ou você prefere verificar pelo App Minha Claro?"
 
 # 4. Interface Visual (O que a Dri vai ver)
 st.set_page_config(page_title="Simulador AVI Claro", page_icon="📞")
