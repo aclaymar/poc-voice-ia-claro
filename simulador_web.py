@@ -21,14 +21,22 @@ def tocar_audio(texto):
 # 3. Função que CHAMA a Inteligência Real (Claude 3.5)
 def obter_resposta_ia(pergunta):
     import time
-    time.sleep(1) # Simula o pensamento do AVI
+    time.sleep(1.5) # Dá aquele efeito de que a IA está "pensando"
     p = pergunta.lower()
-    if "iphone" in p or "pedido" in p:
-        return "Olá! Identifiquei seu pedido de iPhone no sistema. Ele está em processamento logístico e a entrega está prevista para amanhã. Posso ajudar com algo mais?"
+    
+    # Lógica de Respostas Estratégicas para a Claro
+    if "iphone" in p or "pedido" in p or "onde está" in p:
+        return "Olá! Com certeza, entendo sua ansiedade. Identifiquei seu pedido de iPhone no sistema. Ele já foi faturado e está em processamento logístico. A entrega está prevista para amanhã até às 18h. Você receberá o código de rastreio por e-mail em breve. Posso ajudar com algo mais?"
+    
+    elif "instalação" in p or "técnico" in p or "visita" in p:
+        return "Olá, tudo bem? Você pode consultar o horário exato ou até reagendar sua visita técnica direto pelo App Minha Claro Residencial, na seção 'Minhas Visitas'. É muito mais rápido por lá! Deseja que eu envie o link do App para o seu celular?"
+    
     elif "endereço" in p or "mudar" in p:
-        return "Entendo sua necessidade, mas por normas de segurança da Claro, não alteramos o endereço após a compra. O ideal é o cancelamento e uma nova compra. Quer que eu te ensine como cancelar?"
+        return "Entendo sua necessidade, mas por normas de segurança da Claro, não conseguimos alterar o endereço de entrega após o pedido ser gerado. O procedimento padrão é o cancelamento e uma nova compra com o endereço correto. Gostaria que eu te explicasse como fazer o cancelamento?"
+    
     else:
-        return "Olá! Sou o AVI, assistente virtual da Claro. Entendo sua dúvida e estou consultando nossos especialistas. Posso te transferir para um consultor ou você prefere verificar pelo App Minha Claro?"
+        # Resposta padrão para qualquer outra dúvida
+        return "Olá! Sou o AVI, assistente virtual da Claro. Entendo perfeitamente sua dúvida e estou consultando nossas bases de conhecimento. Para agilizar, recomendo verificar o portal Minha Claro ou, se preferir, posso te transferir para um de nossos especialistas. Como você prefere seguir?"
 
 # 4. Interface Visual (O que a Dri vai ver)
 st.set_page_config(page_title="Simulador AVI Claro", page_icon="📞")
