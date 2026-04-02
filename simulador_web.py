@@ -6,7 +6,7 @@ import base64
 import time
 
 # 1. Configuração da API (Use sua chave sk-ant aqui para o teste no PyCharm)
-client = Anthropic(api_key="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")
+client = Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
 # 2. Função para falar (Voz da Claro)
 def tocar_audio(texto):
     tts = gTTS(text=texto, lang='pt', tld='com.br')
