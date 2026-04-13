@@ -78,3 +78,19 @@ def obter_resposta_ia(pergunta):
         return "Entendo sua necessidade, mas por normas de segurança da Claro, não conseguimos alterar o endereço de entrega após o pedido ser gerado. O procedimento padrão é o cancelamento e uma nova compra com o endereço correto. Gostaria que eu te explicasse como fazer o cancelamento?"
     else:
         return "Olá! Sou o AVI, assistente virtual da Claro. Entendo perfeitamente sua dúvida e estou consultando nossas bases de conhecimento. Como prefere seguir?"
+    
+    # --- INTERFACE DO USUÁRIO ---
+st.title("📞 AVI - Assistente Virtual Claro")
+st.subheader("Showcase Pós-Venda - Voz Ultra-Realista")
+
+st.markdown("---")
+pergunta = st.text_input("Como posso ajudar você hoje?", placeholder="Ex: Onde está meu iPhone?")
+
+if st.button("Iniciar Chamada"):
+    if pergunta:
+        with st.spinner("Conectando ao AVI..."):
+            resposta = obter_resposta_ia(pergunta)
+            st.chat_message("assistant").write(resposta)
+            tocar_audio(resposta)
+    else:
+        st.warning("Por favor, digite sua dúvida antes de iniciar.")
