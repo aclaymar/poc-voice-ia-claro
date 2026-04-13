@@ -51,11 +51,15 @@ except Exception as e:
 
 def tocar_audio(texto):
     try:
-        audio = client_eleven.generate(
+        # A forma correta na versão nova é client.generate (mas acessando o método text-to-speech)
+        # Ou usando o atalho simplificado:
+        audio = client_eleven.text_to_speech.convert(
             text=texto,
-            voice="RGymW84CSmfVugnA5tvA", 
-            model="eleven_multilingual_v2"
+            voice_id="RGymW84CSmfVugnA5tvA", 
+            model_id="eleven_multilingual_v2"
         )
+        
+        # O retorno da versão nova já vem pronto para ser lido
         audio_bytes = b"".join(audio)
         b64 = base64.b64encode(audio_bytes).decode()
         md = f"""
