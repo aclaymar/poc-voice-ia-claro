@@ -5,15 +5,17 @@ import os
 import base64
 import time
 
-# --- CONFIGURAÇÃO DA PÁGINA (Para evitar tela em branco) ---
+# 1. ESTA DEVE SER A PRIMEIRA LINHA DO STREAMLIT (Sempre!)
 st.set_page_config(page_title="AVI Claro - Pós-Venda", page_icon="📞")
 
 # --- ESTILO CLARO (CSS) ---
 st.markdown("""
     <style>
-    .main { background-color: #ee1d23; color: white; }
+    .stApp { background-color: #ee1d23; }
+    .main { color: white; }
     .stButton>button { background-color: white; color: #ee1d23; border-radius: 20px; width: 100%; font-weight: bold; }
     .stTextInput>div>div>input { border-radius: 15px; }
+    h1, h2, h3, p { color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
