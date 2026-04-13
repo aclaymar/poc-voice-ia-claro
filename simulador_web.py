@@ -11,11 +11,30 @@ st.set_page_config(page_title="AVI Claro - Pós-Venda", page_icon="📞")
 # --- ESTILO CLARO (CSS) ---
 st.markdown("""
     <style>
-    .stApp { background-color: #ee1d23; }
-    .main { color: white; }
-    .stButton>button { background-color: white; color: #ee1d23; border-radius: 20px; width: 100%; font-weight: bold; }
-    .stTextInput>div>div>input { border-radius: 15px; }
-    h1, h2, h3, p { color: white !important; }
+    /* Força o fundo de toda a aplicação para vermelho */
+    .stApp {
+        background-color: #ee1d23 !important;
+    }
+    
+    /* Garante que os textos, títulos e labels fiquem brancos */
+    h1, h2, h3, p, span, label, .stMarkdown {
+        color: white !important;
+    }
+
+    /* Estiliza o campo de entrada de texto */
+    .stTextInput>div>div>input {
+        color: black !important; /* Texto que o usuário digita fica preto para leitura */
+        border-radius: 10px;
+    }
+
+    /* Estiliza o botão para ficar branco com letras vermelhas */
+    .stButton>button {
+        background-color: white !important;
+        color: #ee1d23 !important;
+        border-radius: 20px;
+        font-weight: bold;
+        border: none;
+    }
     </style>
     """, unsafe_allow_html=True)
 
