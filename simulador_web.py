@@ -1,10 +1,11 @@
 import streamlit as st
-import boto3  # Adicionado para AWS
+import boto3
 import json
 from elevenlabs.client import ElevenLabs
 import os
 import base64
 import time
+from streamlit_mic_recorder import mic_recorder
 
 # 1. Configuração Inicial
 st.set_page_config(page_title="AVI Claro - Pós-Venda", page_icon="📞")
@@ -21,10 +22,7 @@ st.markdown("""
 
 # --- INICIALIZAÇÃO DE APIs ---
 try:
-    # Cliente ElevenLabs
     client_eleven = ElevenLabs(api_key=st.secrets["ELEVEN_API_KEY"])
-    
-    # Cliente AWS Bedrock
     bedrock = boto3.client(
         service_name='bedrock-runtime',
         region_name='us-east-1', 
@@ -32,7 +30,7 @@ try:
         aws_secret_access_key=st.secrets["AWS_SECRET_KEY"]
     )
 except Exception as e:
-    st.error(f"Erro na inicialização: Verifique os Secrets (AWS e ElevenLabs).")
+    st.error(f"Erro na inicialização: Verifique os Secrets.")
     st.stop()
 
 # --- FUNÇÕES CORE ---
@@ -52,39 +50,53 @@ def tocar_audio(texto):
         st.error(f"Erro ElevenLabs: {e}")
 
 def obter_resposta_ia(pergunta):
-    """Chama o Claude 3.5 no Amazon Bedrock para gerar a resposta"""
     try:
         prompt_sistema = "Você é o AVI, o assistente virtual de pós-venda da Claro. Seja cordial, direto e resolutivo. Use no máximo 3 frases por resposta."
-        
         body = json.dumps({
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": 300,
             "system": prompt_sistema,
             "messages": [{"role": "user", "content": pergunta}]
         })
-
         response = bedrock.invoke_model(
             modelId="anthropic.claude-3-haiku-20240307-v1:0",
             body=body
         )
-        
         response_body = json.loads(response.get('body').read())
         return response_body['content'][0]['text']
     except Exception as e:
-        return f"Desculpe, tive um problema ao processar sua solicitação no Bedrock: {e}"
+        return f"Erro no Bedrock: {e}"
 
 # --- INTERFACE DO USUÁRIO ---
 st.title("📞 AVI - Assistente Virtual Claro")
-st.subheader("Showcase Pós-Venda - Amazon Bedrock + ElevenLabs")
+st.subheader("Showcase Pós-Venda - Bedrock + ElevenLabs")
 
 st.markdown("---")
-pergunta = st.text_input("Como posso ajudar você hoje?", placeholder="Ex: Onde está meu iPhone?")
 
-if st.button("Iniciar Chamada"):
-    if pergunta:
-        with st.spinner("Consultando sistemas Claro via Bedrock..."):
-            resposta = obter_resposta_ia(pergunta)
-            st.chat_message("assistant").write(resposta)
-            tocar_audio(resposta)
-    else:
-        st.warning("Por favor, digite sua dúvida antes de iniciar.")
+# Seção de Voz
+st.write("### 🎙️ Fale com o AVI")
+audio_gravado = mic_recorder(
+    start_prompt="🔴 Iniciar Conversa por Voz",
+    stop_prompt="🟢 Enviar Áudio",
+    key='recorder'
+)
+
+st.markdown("### ⌨️ Ou digite sua dúvida")
+pergunta_texto = st.text_input("Como posso ajudar?", placeholder="Ex: Onde está meu iPhone?")
+
+# Lógica de Processamento
+pergunta_final = None
+
+# Prioridade para o áudio se ele existir
+if audio_gravado:
+    # Por enquanto simulando transcrição
+    pergunta_final = "Onde está meu pedido de iPhone?" 
+    st.info(f"Você disse: {pergunta_final}")
+elif st.button("Enviar Texto") and pergunta_texto:
+    pergunta_final = pergunta_texto
+
+if pergunta_final:
+    with st.spinner("O AVI está processando..."):
+        resposta = obter_resposta_ia(pergunta_final)
+        st.chat_message("assistant").write(resposta)
+        tocar_audio(resposta)
