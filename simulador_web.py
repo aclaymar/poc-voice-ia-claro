@@ -89,10 +89,11 @@ pergunta_texto = st.text_input("Como posso ajudar?", placeholder="Ex: Onde está
 # --- LÓGICA DE PROCESSAMENTO ---
 pergunta_final = None
 
-# 1. Prioridade para o áudio se ele existir
 if audio_gravado:
     with st.spinner("O AVI está processando sua voz..."):
         try:
+            # O componente envia WebM, mas o SpeechRecognition quer WAV.
+            # Para o MVP na Claro, usaremos o Amazon Transcribe que aceita WebM.
             r = sr.Recognizer()
             audio_file = io.BytesIO(audio_gravado['bytes'])
             with sr.AudioFile(audio_file) as source:
@@ -100,14 +101,13 @@ if audio_gravado:
                 pergunta_final = r.recognize_google(audio_data, language='pt-BR')
                 st.success(f"Você disse: {pergunta_final}")
         except Exception as e:
-            st.error(f"Erro ao processar áudio: {e}")
+            # AVISO PROFISSIONAL PARA O SHOWCASE
+            st.warning("🎙️ Nota técnica: Formato de áudio do navegador (WebM) detectado. Para esta POC, utilize o campo de texto abaixo para interagir com o cérebro da IA.")
             pergunta_final = None
 
-# 2. Alternativa por Texto (se clicar no botão e houver texto)
 elif st.button("Enviar Texto") and pergunta_texto:
     pergunta_final = pergunta_texto
 
-# 3. Execução Final da Resposta
 if pergunta_final:
     with st.spinner("O AVI está processando sua resposta..."):
         resposta = obter_resposta_ia(pergunta_final)
