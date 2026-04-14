@@ -3,3 +3,4 @@ anthropic
 elevenlabs
 boto3
 streamlit-mic-recorder
+SpeechRecognition

@@ -5,7 +5,9 @@ from elevenlabs.client import ElevenLabs
 import os
 import base64
 import time
+import io
 from streamlit_mic_recorder import mic_recorder
+import speech_recognition as sr  # Import necessário para transcrição
 
 # 1. Configuração Inicial
 st.set_page_config(page_title="AVI Claro - Pós-Venda", page_icon="📞")
@@ -87,16 +89,28 @@ pergunta_texto = st.text_input("Como posso ajudar?", placeholder="Ex: Onde está
 # Lógica de Processamento
 pergunta_final = None
 
-# Prioridade para o áudio se ele existir
+# 1. Processamento de Áudio Real
 if audio_gravado:
-    # Por enquanto simulando transcrição
-    pergunta_final = "Onde está meu pedido de iPhone?" 
-    st.info(f"Você disse: {pergunta_final}")
+    with st.spinner("O AVI está ouvindo e transcrevendo..."):
+        try:
+            r = sr.Recognizer()
+            audio_file = io.BytesIO(audio_gravado['bytes'])
+            with sr.AudioFile(audio_file) as source:
+                audio_data = r.record(source)
+                # Transcrição Real usando Google Speech Recognition (Grátis e eficiente para POC)
+                pergunta_final = r.recognize_google(audio_data, language='pt-BR')
+                st.success(f"Você disse: {pergunta_final}")
+        except Exception as e:
+            st.error(f"Não consegui entender o áudio: {e}")
+            pergunta_final = None
+
+# 2. Processamento de Texto
 elif st.button("Enviar Texto") and pergunta_texto:
     pergunta_final = pergunta_texto
 
+# 3. Execução da IA e Resposta por Voz
 if pergunta_final:
-    with st.spinner("O AVI está processando..."):
+    with st.spinner("O AVI está processando sua resposta..."):
         resposta = obter_resposta_ia(pergunta_final)
         st.chat_message("assistant").write(resposta)
         tocar_audio(resposta)
