@@ -86,5 +86,30 @@ audio_gravado = mic_recorder(
 st.markdown("### ⌨️ Ou digite sua dúvida")
 pergunta_texto = st.text_input("Como posso ajudar?", placeholder="Ex: Onde está meu iPhone?")
 
-# Lógica de Processamento
-pergunta
+# --- LÓGICA DE PROCESSAMENTO ---
+pergunta_final = None
+
+# 1. Prioridade para o áudio se ele existir
+if audio_gravado:
+    with st.spinner("O AVI está processando sua voz..."):
+        try:
+            r = sr.Recognizer()
+            audio_file = io.BytesIO(audio_gravado['bytes'])
+            with sr.AudioFile(audio_file) as source:
+                audio_data = r.record(source)
+                pergunta_final = r.recognize_google(audio_data, language='pt-BR')
+                st.success(f"Você disse: {pergunta_final}")
+        except Exception as e:
+            st.error(f"Erro ao processar áudio: {e}")
+            pergunta_final = None
+
+# 2. Alternativa por Texto (se clicar no botão e houver texto)
+elif st.button("Enviar Texto") and pergunta_texto:
+    pergunta_final = pergunta_texto
+
+# 3. Execução Final da Resposta
+if pergunta_final:
+    with st.spinner("O AVI está processando sua resposta..."):
+        resposta = obter_resposta_ia(pergunta_final)
+        st.chat_message("assistant").write(resposta)
+        tocar_audio(resposta)
