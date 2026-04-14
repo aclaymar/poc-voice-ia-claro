@@ -5,9 +5,8 @@ from elevenlabs.client import ElevenLabs
 import os
 import base64
 import time
-import io
+import requests
 from streamlit_mic_recorder import mic_recorder
-import speech_recognition as sr
 
 # 1. Configuração Inicial
 st.set_page_config(page_title="AVI Claro - Pós-Venda", page_icon="📞")
@@ -22,20 +21,60 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- INICIALIZAÇÃO DE APIs ---
+# --- INICIALIZAÇÃO DE APIs E CLIENTES AWS ---
 try:
     client_eleven = ElevenLabs(api_key=st.secrets["ELEVEN_API_KEY"])
-    bedrock = boto3.client(
-        service_name='bedrock-runtime',
-        region_name='us-east-1', 
-        aws_access_key_id=st.secrets["AWS_ACCESS_KEY"],
-        aws_secret_access_key=st.secrets["AWS_SECRET_KEY"]
-    )
+    
+    # Credenciais compartilhadas
+    aws_auth = {
+        "aws_access_key_id": st.secrets["AWS_ACCESS_KEY"],
+        "aws_secret_access_key": st.secrets["AWS_SECRET_KEY"],
+        "region_name": "us-east-1"
+    }
+
+    bedrock = boto3.client(service_name='bedrock-runtime', **aws_auth)
+    s3_client = boto3.client('s3', **aws_auth)
+    transcribe_client = boto3.client('transcribe', **aws_auth)
+
 except Exception as e:
     st.error(f"Erro na inicialização: Verifique os Secrets.")
     st.stop()
 
 # --- FUNÇÕES CORE ---
+
+def transcrever_audio_aws(audio_bytes):
+    """Sobe o áudio para o S3 e usa o Transcribe para converter em texto"""
+    job_name = f"transcricao_{int(time.time())}"
+    bucket_name = "audio-claro-poc-andy" 
+    file_name = f"{job_name}.webm"
+
+    try:
+        # 1. Upload para S3
+        s3_client.put_object(Bucket=bucket_name, Key=file_name, Body=audio_bytes)
+        
+        # 2. Inicia Transcrição
+        job_uri = f"s3://{bucket_name}/{file_name}"
+        transcribe_client.start_transcription_job(
+            TranscriptionJobName=job_name,
+            Media={'MediaFileUri': job_uri},
+            MediaFormat='webm',
+            LanguageCode='pt-BR'
+        )
+
+        # 3. Aguarda o resultado (Polling)
+        while True:
+            status = transcribe_client.get_transcription_job(TranscriptionJobName=job_name)
+            if status['TranscriptionJob']['TranscriptionJobStatus'] in ['COMPLETED', 'FAILED']:
+                break
+            time.sleep(1)
+
+        if status['TranscriptionJob']['TranscriptionJobStatus'] == 'COMPLETED':
+            result_url = status['TranscriptionJob']['Transcript']['TranscriptFileUri']
+            response = requests.get(result_url)
+            return response.json()['results']['transcripts'][0]['transcript']
+    except Exception as e:
+        st.error(f"Erro no processo AWS: {e}")
+    return None
 
 def tocar_audio(texto):
     try:
@@ -71,11 +110,9 @@ def obter_resposta_ia(pergunta):
 
 # --- INTERFACE DO USUÁRIO ---
 st.title("📞 AVI - Assistente Virtual Claro")
-st.subheader("Showcase Pós-Venda - Bedrock + ElevenLabs")
+st.subheader("Showcase Pós-Venda - AWS Infrastructure")
 
 st.markdown("---")
-
-# Seção de Voz
 st.write("### 🎙️ Fale com o AVI")
 audio_gravado = mic_recorder(
     start_prompt="🔴 Iniciar Conversa por Voz",
@@ -86,24 +123,14 @@ audio_gravado = mic_recorder(
 st.markdown("### ⌨️ Ou digite sua dúvida")
 pergunta_texto = st.text_input("Como posso ajudar?", placeholder="Ex: Onde está meu iPhone?")
 
-# --- LÓGICA DE PROCESSAMENTO ---
 pergunta_final = None
 
+# LÓGICA DE PROCESSAMENTO
 if audio_gravado:
-    with st.spinner("O AVI está processando sua voz..."):
-        try:
-            # O componente envia WebM, mas o SpeechRecognition quer WAV.
-            # Para o MVP na Claro, usaremos o Amazon Transcribe que aceita WebM.
-            r = sr.Recognizer()
-            audio_file = io.BytesIO(audio_gravado['bytes'])
-            with sr.AudioFile(audio_file) as source:
-                audio_data = r.record(source)
-                pergunta_final = r.recognize_google(audio_data, language='pt-BR')
-                st.success(f"Você disse: {pergunta_final}")
-        except Exception as e:
-            # AVISO PROFISSIONAL PARA O SHOWCASE
-            st.warning("🎙️ Nota técnica: Formato de áudio do navegador (WebM) detectado. Para esta POC, utilize o campo de texto abaixo para interagir com o cérebro da IA.")
-            pergunta_final = None
+    with st.spinner("Amazon Transcribe processando sua voz..."):
+        pergunta_final = transcrever_audio_aws(audio_gravado['bytes'])
+        if pergunta_final:
+            st.success(f"Você disse: {pergunta_final}")
 
 elif st.button("Enviar Texto") and pergunta_texto:
     pergunta_final = pergunta_texto
