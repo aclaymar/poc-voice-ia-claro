@@ -64,7 +64,7 @@ def obter_resposta_ia(pergunta):
         })
 
         response = bedrock.invoke_model(
-            modelId="anthropic.claude-3-5-sonnet-20240620-v1:0",
+            modelId="anthropic.claude-3-haiku-20240307-v1:0",
             body=body
         )
         
