@@ -51,15 +51,13 @@ except Exception as e:
 
 def tocar_audio(texto):
     try:
-        # A forma correta na versão nova é client.generate (mas acessando o método text-to-speech)
-        # Ou usando o atalho simplificado:
+        # Usando o modelo Turbo v2.5: Mais rápido e eficiente para o Showcase
         audio = client_eleven.text_to_speech.convert(
             text=texto,
             voice_id="RGymW84CSmfVugnA5tvA", 
-            model_id="eleven_multilingual_v2"
+            model_id="eleven_turbo_v2_5" 
         )
         
-        # O retorno da versão nova já vem pronto para ser lido
         audio_bytes = b"".join(audio)
         b64 = base64.b64encode(audio_bytes).decode()
         md = f"""
@@ -69,6 +67,7 @@ def tocar_audio(texto):
         """
         st.markdown(md, unsafe_allow_html=True)
     except Exception as e:
+        # Se a ElevenLabs ainda der erro de cota, o app avisa, mas não trava o visual
         st.error(f"Erro ElevenLabs: {e}")
 
 def obter_resposta_ia(pergunta):
