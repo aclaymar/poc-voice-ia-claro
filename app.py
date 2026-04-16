@@ -2,78 +2,126 @@ import os
 import pyttsx3
 from dotenv import load_dotenv
 from anthropic import Anthropic
-from contexto import FAQ_CLARO
+from contexto import SYSTEM_PROMPT, SAUDACAO_INICIAL, RESPOSTA_TRANSFERENCIA, NOME_ASSISTENTE
+from guardrails import classificar_input, deve_transferir_humano, sanitizar_resposta
 
-# 1. Configurações de Segurança
 load_dotenv()
 api_key = os.environ.get("ANTHROPIC_API_KEY")
 
-# Se não encontrar a chave, avisa o usuário em vez de quebrar
 if not api_key:
-    print("\n[ERRO]: Variável ANTHROPIC_API_KEY não encontrada!")
-    print("Certifique-se de que o arquivo .env existe ou a variável está no PyCharm.")
+    print(f"\n[ERRO]: Variável ANTHROPIC_API_KEY não encontrada!")
+    print("Certifique-se de que o arquivo .env existe ou a variável está configurada.")
 
 try:
-    # O .strip() limpa qualquer espaço acidental
     client = Anthropic(api_key=api_key.strip() if api_key else "")
 except Exception as e:
-    print(f"Erro ao iniciar cliente: {e}")
+    print(f"Erro ao iniciar cliente Anthropic: {e}")
 
-# 2. Motor de Voz (TTS)
-def falar(texto):
+historico: list[dict] = []
+
+
+def falar(texto: str):
+    """TTS local via pyttsx3 (fallback para testes sem ElevenLabs)."""
     try:
         engine = pyttsx3.init()
-        engine.setProperty('rate', 185) 
-        voices = engine.getProperty('voices')
-        for voice in voices:
-            if "brazil" in voice.name.lower() or "portuguese" in voice.name.lower():
-                engine.setProperty('voice', voice.id)
+        engine.setProperty("rate", 175)
+        for voice in engine.getProperty("voices"):
+            if any(k in voice.name.lower() for k in ["brazil", "portuguese", "brasil"]):
+                engine.setProperty("voice", voice.id)
                 break
         engine.say(texto)
         engine.runAndWait()
     except Exception as e:
-        print(f"Erro no áudio: {e}")
+        print(f"[ERRO TTS]: {e}")
 
-# 3. Lógica Dinâmica e Humanizada
-def simular_atendimento_claro(pergunta_usuario):
+
+def responder(pergunta: str) -> tuple[str, bool]:
+    """
+    Processa a pergunta com guardrails e LLM.
+    Retorna (resposta, precisa_transferir_humano).
+    """
+    # Guardrail de entrada
+    avaliacao = classificar_input(pergunta)
+    if avaliacao["resposta_guardrail"]:
+        return avaliacao["resposta_guardrail"], False
+
+    # Monta histórico para contexto multi-turno
+    msgs = []
+    for turno in historico:
+        msgs.append({"role": "user",      "content": turno["usuario"]})
+        msgs.append({"role": "assistant", "content": turno["clarinha"]})
+    msgs.append({"role": "user", "content": pergunta})
+
     try:
-        # Aqui o Claude usa as FAQs para criar a resposta na hora
         message = client.messages.create(
-            model="claude-3-5-sonnet-20240620",
-            max_tokens=500,
-            system=FAQ_CLARO + """
-            INSTRUÇÕES ADICIONAIS:
-            - Seja sempre cordial, empático e humanizado.
-            - Use expressões como 'Com certeza', 'Entendo sua dúvida' ou 'Um momento, por favor'.
-            - Se a dúvida for sobre status de pedido, lembre-se que temos alto volume (~9.200 chamadas/mês). [cite: 9, 46, 163]
-            - Seja objetivo para manter o TMO próximo dos 304 segundos. [cite: 46, 148]
-            """, 
-            messages=[{"role": "user", "content": pergunta_usuario}]
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=600,
+            system=SYSTEM_PROMPT,
+            messages=msgs,
         )
-        return message.content[0].text
+        resposta = message.content[0].text
+
     except Exception:
-        # Resposta humanizada de contingência baseada nas FAQs
-        p = pergunta_usuario.lower()
-        if "endereço" in p:
-            return "Olá! Entendo sua necessidade, mas por segurança não conseguimos mudar o endereço após o pedido gerado. O ideal é cancelar e refazer a compra. Posso te ajudar com o passo a passo?"
-        if "instalação" in p or "técnico" in p:
-            return "Olá, tudo bem? Você pode consultar ou reagendar sua visita técnica direto pelo App Minha Claro Residencial. É super rápido! Deseja saber mais algum detalhe?"
-        return "Com certeza! Identifiquei seu pedido e ele está seguindo o fluxo normal. Você receberá o status atualizado por e-mail em até 24 horas. Posso ajudar em algo mais?"
+        # Fallback humanizado
+        p = pergunta.lower()
+        if any(w in p for w in ["endereço", "endereco"]):
+            resposta = (
+                "Entendo sua necessidade! Por segurança, não é possível alterar "
+                "o endereço após o pedido ser gerado. Posso orientar sobre o cancelamento."
+            )
+        elif any(w in p for w in ["instalação", "técnico"]):
+            resposta = (
+                "Você pode reagendar sua visita técnica pelo app Minha Claro Residencial, "
+                "em Minhas Visitas. Posso ajudar com mais alguma coisa?"
+            )
+        else:
+            resposta = (
+                "Estou aqui para te ajudar! Pode me contar mais sobre sua dúvida?"
+            )
 
-# 4. Interface de Teste
+    resposta = sanitizar_resposta(resposta)
+    precisa_transferir = deve_transferir_humano(resposta)
+    return resposta, precisa_transferir
+
+
+def main():
+    print(f"\n{'─'*50}")
+    print(f"   {NOME_ASSISTENTE.upper()} — ASSISTENTE VIRTUAL CLARO")
+    print(f"{'─'*50}")
+    print("[CHAMADA INICIADA: 0800 CLARO]\n")
+    print(f"[{NOME_ASSISTENTE}]: {SAUDACAO_INICIAL}")
+    falar(SAUDACAO_INICIAL)
+
+    while True:
+        try:
+            pergunta = input("\n[VOCÊ]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print(f"\n[{NOME_ASSISTENTE}]: Obrigada por entrar em contato com a Claro. Até logo!")
+            break
+
+        if not pergunta:
+            continue
+
+        if pergunta.lower() in ["sair", "tchau", "encerrar", "exit"]:
+            encerramento = "Obrigada por entrar em contato com a Claro. Tenha um ótimo dia!"
+            print(f"\n[{NOME_ASSISTENTE}]: {encerramento}")
+            falar(encerramento)
+            break
+
+        print(f"\n[{NOME_ASSISTENTE} processando...]")
+        resposta, precisa_transferir = responder(pergunta)
+
+        print(f"\n[{NOME_ASSISTENTE}]: {resposta}")
+        falar(resposta)
+
+        if precisa_transferir:
+            print(f"\n[SISTEMA]: Transferindo para especialista humano...")
+            print(f"[{NOME_ASSISTENTE}]: {RESPOSTA_TRANSFERENCIA}")
+            falar(RESPOSTA_TRANSFERENCIA)
+            break
+
+        historico.append({"usuario": pergunta, "clarinha": resposta})
+
+
 if __name__ == "__main__":
-    # Simulação de início de chamada
-    inicio_chamada = "Olá! Você ligou para o Pós-Venda da Claro. Sou a assistente virtual do AVI. Como posso te ajudar hoje?"
-    
-    print("\n--- [CHAMADA INICIADA: 0800 CLARO] ---")
-    print(f"\n[IA]: {inicio_chamada}")
-    falar(inicio_chamada) # Ela já começa falando!
-
-    # Agora você interage
-    pergunta = input("\n[VOCÊ]: ")
-    
-    print("\n[IA PROCESSANDO...]")
-    resposta = simular_atendimento_claro(pergunta)
-    
-    print(f"\n[IA RESPONDE]: {resposta}")
-    falar(resposta)
+    main()
