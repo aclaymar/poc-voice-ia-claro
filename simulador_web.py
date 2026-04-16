@@ -1,3 +1,7 @@
+"""
+Clarinha — Assistente Virtual de Voz da Claro Brasil
+Simulador com UI estilo iPhone
+"""
 import streamlit as st
 import boto3
 import json
@@ -5,327 +9,517 @@ from elevenlabs.client import ElevenLabs
 import base64
 import time
 import requests
+import os
 from streamlit_mic_recorder import mic_recorder
 from contexto import SYSTEM_PROMPT, SAUDACAO_INICIAL, RESPOSTA_TRANSFERENCIA, NOME_ASSISTENTE
 from guardrails import classificar_input, deve_transferir_humano, sanitizar_resposta
 from portfolio import resumo_para_contexto
-import os
 
 # ─────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────
 st.set_page_config(
-    page_title=f"{NOME_ASSISTENTE} · Claro Pós-Venda",
+    page_title=f"{NOME_ASSISTENTE} · Claro",
     page_icon="📞",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
 
-NUMERO_CLARO = "0800 738 0001"
-CLARINHA_PHOTO = "img/clarinha.png"  # coloque aqui a foto da Clarinha
+NUMERO_CLARO  = "0800 738 0001"
+CLARINHA_PHOTO = "img/clarinha.png"
 HAS_PHOTO = os.path.exists(CLARINHA_PHOTO)
 
+# Modelos Bedrock em ordem de preferência
+BEDROCK_MODELS = [
+    "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    "anthropic.claude-3-haiku-20240307-v1:0",
+]
+
 # ─────────────────────────────────────────────────────
-# CSS GLOBAL — tema escuro estilo apresentação
+# CSS — SITE COM FRAME DE IPHONE
 # ─────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* Reset Streamlit */
-.stApp { background: linear-gradient(135deg,#080c1f 0%,#0f1535 55%,#0a1028 100%) !important; }
+/* ── Fundo da página (mesa/desk) ──────────────────── */
+.stApp {
+    background: radial-gradient(ellipse at 50% 0%, #1a2040 0%, #090c1e 70%) !important;
+    min-height: 100vh;
+}
 #MainMenu, footer, header { visibility: hidden; }
-.block-container { padding: 0 !important; max-width: 480px; margin: 0 auto; }
 
-/* ── TELA IDLE ───────────────────────────── */
+/* ── Frame externo do iPhone ─────────────────────── */
+.block-container {
+    max-width: 393px !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 28px auto 28px !important;
+
+    /* Corpo do telefone */
+    background: #0d0d0f !important;
+    border-radius: 52px !important;
+
+    /* Moldura metálica */
+    outline: 10px solid #2a2a2e;
+    outline-offset: 0;
+    box-shadow:
+        0 0 0 1px #111,
+        0 0 0 11px #1e1e22,
+        0 0 0 13px #3a3a40,
+        0 60px 120px rgba(0,0,0,.95),
+        0 20px 40px rgba(0,0,0,.6);
+
+    /* Espaço para dynamic island e home indicator */
+    padding-top: 58px !important;
+    padding-bottom: 30px !important;
+    overflow: hidden !important;
+    position: relative !important;
+    min-height: 820px !important;
+}
+
+/* ── Botões laterais simulados ──────────────────── */
+.block-container::before {  /* botões volume esquerda */
+    content: '';
+    position: absolute;
+    left: -20px; top: 160px;
+    width: 6px; height: 80px;
+    background: #2a2a2e;
+    border-radius: 3px 0 0 3px;
+    box-shadow: 0 -50px 0 #2a2a2e, 0 -90px 0 #2a2a2e;
+}
+.block-container::after {   /* botão power direita */
+    content: '';
+    position: absolute;
+    right: -20px; top: 200px;
+    width: 6px; height: 90px;
+    background: #2a2a2e;
+    border-radius: 0 3px 3px 0;
+}
+
+/* ── Dynamic Island (notch) ─────────────────────── */
+.dynamic-island {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 120px;
+    height: 34px;
+    background: #000;
+    border-radius: 20px;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+.di-camera { width:10px; height:10px; border-radius:50%; background:#1a1a1a;
+    border:1px solid #333; }
+.di-speaker { width:32px; height:5px; border-radius:3px; background:#111; }
+
+/* ── Barra de status iOS ──────────────────────────── */
+.status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 24px;
+    height: 44px;
+    margin-top: -10px;
+    position: relative;
+    z-index: 50;
+}
+.sb-time  { color: #fff; font-size: 15px; font-weight: 700; letter-spacing: -.3px; }
+.sb-icons { display: flex; gap: 5px; align-items: center; }
+.sb-signal { display: flex; gap: 2px; align-items: flex-end; }
+.sb-signal span { background: #fff; border-radius: 1px; width: 4px; }
+.sb-battery {
+    width: 24px; height: 12px; border: 1.5px solid #fff; border-radius: 3px;
+    position: relative;
+    display: flex; align-items: center; padding: 1.5px;
+}
+.sb-battery::after {
+    content:''; position:absolute; right:-4px; top:50%; transform:translateY(-50%);
+    width:3px; height:5px; background:#fff; border-radius:0 1px 1px 0;
+}
+.sb-battery-fill { background:#fff; border-radius:1px; height:100%; width:75%; }
+
+/* ── Home indicator ───────────────────────────────── */
+.home-indicator {
+    width: 130px; height: 5px;
+    background: rgba(255,255,255,.3);
+    border-radius: 3px;
+    margin: 16px auto 0;
+}
+
+/* ── TELA IDLE ─────────────────────────────────────── */
 .idle-screen {
-    display:flex; flex-direction:column; align-items:center; justify-content:center;
-    min-height:100vh; padding:32px 24px; text-align:center;
+    padding: 16px 24px 24px;
+    text-align: center;
+    color: #fff;
+    min-height: 720px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
-.brand-badge {
-    display:inline-flex; align-items:center; gap:8px;
-    background:rgba(238,29,35,0.18); border:1px solid rgba(238,29,35,0.45);
-    border-radius:24px; padding:6px 18px; margin-bottom:28px;
-    color:#ff6b6b; font-size:.82rem; font-weight:600; letter-spacing:.04em;
+.phone-dialer-header {
+    font-size: .78rem;
+    color: rgba(255,255,255,.45);
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
 }
-.voiceia-title {
-    font-size:3.2rem; font-weight:900; color:#fff;
-    letter-spacing:-.02em; line-height:1;
+.phone-number-display {
+    font-size: 2.2rem;
+    font-weight: 300;
+    letter-spacing: .08em;
+    color: #fff;
+    margin: 4px 0 2px;
 }
-.voiceia-title span { color:#ee1d23; }
-.idle-subtitle {
-    color:rgba(255,255,255,.55); font-size:.95rem; margin:10px 0 36px;
+.phone-contact-name {
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 4px;
 }
-.number-display {
-    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12);
-    border-radius:16px; padding:20px 32px; margin-bottom:32px;
+.phone-contact-sub {
+    font-size: .82rem;
+    color: rgba(255,255,255,.5);
+    margin-bottom: 40px;
 }
-.number-label { color:rgba(255,255,255,.45); font-size:.78rem; letter-spacing:.08em; text-transform:uppercase; }
-.number-value { color:#fff; font-size:1.9rem; font-weight:700; letter-spacing:.04em; margin-top:4px; }
-.number-sub   { color:rgba(255,255,255,.4); font-size:.78rem; margin-top:4px; }
-.btn-call {
-    display:inline-flex; align-items:center; gap:10px;
-    background:linear-gradient(135deg,#22c55e,#16a34a);
-    color:#fff; font-size:1.1rem; font-weight:700;
-    border:none; border-radius:999px; padding:18px 48px;
-    cursor:pointer; box-shadow:0 0 32px rgba(34,197,94,.45);
-    transition:transform .15s, box-shadow .15s;
+.phone-contact-avatar {
+    width: 100px; height: 100px; border-radius: 50%;
+    background: linear-gradient(135deg, #ee1d23 0%, #c01018 100%);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2.6rem;
+    margin: 0 auto 24px;
+    box-shadow: 0 8px 32px rgba(238,29,35,.4);
 }
-.btn-call:hover { transform:scale(1.05); box-shadow:0 0 48px rgba(34,197,94,.6); }
-.stats-row {
-    display:flex; gap:16px; margin-top:40px; width:100%;
+.phone-contact-avatar img {
+    width: 100%; height: 100%; border-radius: 50%; object-fit: cover;
 }
-.stat-card {
-    flex:1; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08);
-    border-radius:14px; padding:14px 8px; text-align:center;
+.dialer-actions {
+    display: flex;
+    justify-content: center;
+    gap: 32px;
+    margin: 20px 0;
 }
-.stat-value { color:#ee1d23; font-size:1.25rem; font-weight:800; }
-.stat-label { color:rgba(255,255,255,.45); font-size:.7rem; margin-top:2px; }
+.dialer-action-btn {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    background: rgba(255,255,255,.1);
+    border: none; border-radius: 50%;
+    width: 64px; height: 64px;
+    font-size: 1.4rem; cursor: pointer; color: #fff;
+}
+.dialer-action-label { font-size: .65rem; color: rgba(255,255,255,.6); margin-top: -24px; }
+.call-btn-green {
+    width: 72px; height: 72px; border-radius: 50%;
+    background: #22c55e;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.8rem; cursor: pointer; border: none;
+    box-shadow: 0 0 0 0 rgba(34,197,94,.5);
+    animation: call-btn-pulse 2s ease-in-out infinite;
+    margin: 0 auto;
+}
+@keyframes call-btn-pulse {
+    0%,100%{ box-shadow: 0 0 0 0 rgba(34,197,94,.5); }
+    50%    { box-shadow: 0 0 0 14px rgba(34,197,94,.0); }
+}
 
-/* ── TELA RINGING ────────────────────────── */
-.ring-screen {
-    display:flex; flex-direction:column; align-items:center; justify-content:center;
-    min-height:100vh; padding:32px 24px; text-align:center;
+/* ── TELA RINGING ──────────────────────────────────── */
+.ringing-screen {
+    padding: 16px 24px;
+    text-align: center;
+    color: #fff;
+    min-height: 720px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
 }
-.claro-logo-ring { margin-bottom:12px; }
-.ring-company { color:rgba(255,255,255,.6); font-size:.85rem; letter-spacing:.06em; text-transform:uppercase; }
-.ring-number  { color:#fff; font-size:2.4rem; font-weight:800; letter-spacing:.06em; margin:6px 0; }
-.ring-type    { color:rgba(255,255,255,.45); font-size:.85rem; margin-bottom:48px; }
-.ring-avatar-wrap { position:relative; margin-bottom:40px; }
-.ring-avatar {
-    width:100px; height:100px; border-radius:50%;
-    background:linear-gradient(135deg,#1e2a5e,#2d3a7a);
-    border:3px solid rgba(255,255,255,.15);
-    display:flex; align-items:center; justify-content:center;
-    font-size:2.8rem;
-    animation: ring-pulse 1.4s ease-in-out infinite;
+.ringing-contact-name { font-size: 1.5rem; font-weight: 600; margin-bottom: 4px; }
+.ringing-status {
+    font-size: .9rem; color: rgba(255,255,255,.6); margin-bottom: 40px;
 }
+.ringing-avatar {
+    width: 120px; height: 120px; border-radius: 50%;
+    background: linear-gradient(135deg, #ee1d23 0%, #c01018 100%);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 3rem;
+    margin: 0 auto 32px;
+    animation: ring-pulse 1.6s ease-out infinite;
+    overflow: hidden;
+}
+.ringing-avatar img { width:100%; height:100%; border-radius:50%; object-fit:cover; }
 @keyframes ring-pulse {
-    0%,100%{ box-shadow:0 0 0 0 rgba(238,29,35,.5), 0 0 0 0 rgba(238,29,35,.25); }
-    50%    { box-shadow:0 0 0 18px rgba(238,29,35,.0), 0 0 0 36px rgba(238,29,35,.0); }
-    25%    { box-shadow:0 0 0 14px rgba(238,29,35,.25), 0 0 0 28px rgba(238,29,35,.1); }
+    0%   { box-shadow: 0 0 0 0px rgba(238,29,35,.6); }
+    40%  { box-shadow: 0 0 0 24px rgba(238,29,35,.15); }
+    100% { box-shadow: 0 0 0 48px rgba(238,29,35,.0); }
 }
-.ring-status { color:rgba(255,255,255,.7); font-size:1rem; margin-bottom:8px; }
-.ring-dots span {
-    display:inline-block; width:6px; height:6px; border-radius:50%;
-    background:#ee1d23; margin:0 3px;
-    animation: dot-bounce .8s ease-in-out infinite;
+.ringing-actions {
+    display: flex;
+    justify-content: space-around;
+    width: 100%;
+    padding-bottom: 16px;
 }
-.ring-dots span:nth-child(2) { animation-delay:.15s; }
-.ring-dots span:nth-child(3) { animation-delay:.30s; }
-@keyframes dot-bounce { 0%,100%{transform:translateY(0);opacity:.4;} 50%{transform:translateY(-5px);opacity:1;} }
+.btn-decline {
+    width: 72px; height: 72px; border-radius: 50%;
+    background: #ef4444; border: none; cursor: pointer;
+    font-size: 1.8rem; color: #fff;
+    box-shadow: 0 4px 16px rgba(239,68,68,.4);
+}
+.btn-accept {
+    width: 72px; height: 72px; border-radius: 50%;
+    background: #22c55e; border: none; cursor: pointer;
+    font-size: 1.8rem; color: #fff;
+    box-shadow: 0 4px 16px rgba(34,197,94,.4);
+}
 
-/* ── TELA CONNECTED ──────────────────────── */
+/* ── TELA CONNECTED ─────────────────────────────────── */
 .call-header {
-    display:flex; justify-content:space-between; align-items:center;
-    padding:16px 20px; background:rgba(0,0,0,.3);
-    border-bottom:1px solid rgba(255,255,255,.06);
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 24px 12px;
+    border-bottom: 1px solid rgba(255,255,255,.06);
 }
-.call-status-dot { width:8px; height:8px; border-radius:50%; background:#22c55e; display:inline-block;
-    box-shadow:0 0 6px #22c55e; animation:status-blink 2s ease-in-out infinite; }
-@keyframes status-blink { 0%,100%{opacity:1;} 50%{opacity:.4;} }
-.call-status-text { color:#22c55e; font-size:.82rem; font-weight:600; margin-left:7px; }
-.call-timer { color:rgba(255,255,255,.6); font-size:.82rem; font-variant-numeric:tabular-nums; }
+.call-status {
+    display: flex; align-items: center; gap: 6px;
+}
+.call-dot { width:8px; height:8px; border-radius:50%; background:#22c55e;
+    animation: dot-blink 2s ease-in-out infinite; }
+@keyframes dot-blink { 0%,100%{opacity:1;} 50%{opacity:.3;} }
+.call-label { color: #22c55e; font-size: .82rem; font-weight: 600; }
+.call-timer { color: rgba(255,255,255,.5); font-size: .82rem; font-variant-numeric: tabular-nums; }
 
-.avatar-section { display:flex; flex-direction:column; align-items:center; padding:28px 20px 16px; }
-.avatar-ring-outer {
-    position:relative; display:flex; align-items:center; justify-content:center;
-    width:148px; height:148px;
+.agent-section {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 20px 0 12px;
 }
-.avatar-ring-outer.speaking::before {
-    content:''; position:absolute; inset:-8px; border-radius:50%;
-    border:2px solid rgba(238,29,35,.6);
-    animation:speak-ring-1 1.0s ease-out infinite;
+.agent-avatar-wrap {
+    position: relative;
+    width: 120px; height: 120px;
 }
-.avatar-ring-outer.speaking::after {
-    content:''; position:absolute; inset:-18px; border-radius:50%;
-    border:2px solid rgba(238,29,35,.3);
-    animation:speak-ring-1 1.0s ease-out .25s infinite;
+.agent-avatar-wrap.speaking::before {
+    content:''; position:absolute; inset:-10px; border-radius:50%;
+    border: 2px solid rgba(238,29,35,.7);
+    animation: speak-wave 1s ease-out infinite;
 }
-@keyframes speak-ring-1 {
-    0%   { transform:scale(.88); opacity:.9; }
-    100% { transform:scale(1.12); opacity:0; }
+.agent-avatar-wrap.speaking::after {
+    content:''; position:absolute; inset:-22px; border-radius:50%;
+    border: 2px solid rgba(238,29,35,.35);
+    animation: speak-wave 1s .25s ease-out infinite;
 }
-.avatar-img {
-    width:132px; height:132px; border-radius:50%; object-fit:cover;
-    border:3px solid rgba(238,29,35,.7);
-    box-shadow:0 0 24px rgba(238,29,35,.35);
+@keyframes speak-wave {
+    0%  { transform:scale(.85); opacity:.9; }
+    100%{ transform:scale(1.15); opacity:0; }
 }
-.avatar-placeholder {
-    width:132px; height:132px; border-radius:50%;
-    background:linear-gradient(135deg,#1a2260,#2c3a8a,#1a2260);
-    border:3px solid rgba(238,29,35,.7);
-    box-shadow:0 0 24px rgba(238,29,35,.35);
+.agent-photo {
+    width:120px; height:120px; border-radius:50%; object-fit:cover;
+    border: 2.5px solid rgba(238,29,35,.6);
+    box-shadow: 0 0 20px rgba(238,29,35,.3);
+    display: block;
+}
+.agent-placeholder {
+    width:120px; height:120px; border-radius:50%;
+    background: linear-gradient(135deg,#ee1d23,#c01018);
     display:flex; align-items:center; justify-content:center;
-    font-size:3.5rem; position:relative; overflow:hidden;
+    font-size:3rem;
+    border: 2.5px solid rgba(238,29,35,.6);
+    box-shadow: 0 0 20px rgba(238,29,35,.3);
+    overflow: hidden;
 }
-.headset-badge {
-    position:absolute; bottom:8px; right:8px;
-    background:#ee1d23; border-radius:50%; width:32px; height:32px;
-    display:flex; align-items:center; justify-content:center;
-    font-size:1rem; border:2px solid #0f1535;
-    box-shadow:0 2px 8px rgba(0,0,0,.5);
+.headset-pill {
+    position:absolute; bottom:4px; right:4px;
+    background:#ee1d23; border-radius:12px;
+    padding:3px 7px; font-size:.65rem; color:#fff; font-weight:700;
+    border:2px solid #0d0d0f;
 }
-.agent-name { color:#fff; font-size:1.15rem; font-weight:700; margin-top:14px; }
-.agent-role { color:rgba(255,255,255,.45); font-size:.8rem; margin-top:2px; }
+.agent-name  { color:#fff; font-size:1.1rem; font-weight:700; margin-top:12px; }
+.agent-role  { color:rgba(255,255,255,.45); font-size:.75rem; margin-top:2px; }
 
-/* Equalizer (boca mexendo) */
-.equalizer { display:flex; gap:3px; align-items:center; height:24px; margin-top:10px; }
-.equalizer.active span {
-    animation:eq-bar .55s ease-in-out infinite alternate;
-}
-.equalizer span {
-    display:block; width:4px; background:#ee1d23; border-radius:2px;
-    height:4px; transition:height .1s;
-}
-.equalizer span:nth-child(1){ animation-delay:.00s; }
-.equalizer span:nth-child(2){ animation-delay:.10s; }
-.equalizer span:nth-child(3){ animation-delay:.05s; }
-.equalizer span:nth-child(4){ animation-delay:.15s; }
-.equalizer span:nth-child(5){ animation-delay:.08s; }
-.equalizer span:nth-child(6){ animation-delay:.12s; }
-.equalizer span:nth-child(7){ animation-delay:.03s; }
-@keyframes eq-bar {
-    0%  { height:3px;  }
-    25% { height:14px; }
-    50% { height:22px; }
-    75% { height:10px; }
-    100%{ height:18px; }
+/* Equalizer boca */
+.eq { display:flex; gap:3px; align-items:center; height:20px; margin-top:8px; }
+.eq span { display:block; width:4px; height:3px; background:#ee1d23; border-radius:2px; }
+.eq.on span { animation: eq-anim .5s ease-in-out infinite alternate; }
+.eq span:nth-child(1){ animation-delay:.00s; }
+.eq span:nth-child(2){ animation-delay:.08s; }
+.eq span:nth-child(3){ animation-delay:.04s; }
+.eq span:nth-child(4){ animation-delay:.12s; }
+.eq span:nth-child(5){ animation-delay:.06s; }
+.eq span:nth-child(6){ animation-delay:.10s; }
+.eq span:nth-child(7){ animation-delay:.02s; }
+@keyframes eq-anim {
+    0%  { height:2px;  }
+    30% { height:12px; }
+    60% { height:20px; }
+    100%{ height:8px;  }
 }
 
 /* Chat */
-.chat-box {
-    margin:0 16px; max-height:260px; overflow-y:auto;
-    display:flex; flex-direction:column; gap:10px;
-    padding:0 4px 8px;
-    scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.15) transparent;
+.chat-area {
+    margin: 4px 16px;
+    max-height: 240px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-bottom: 4px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,.1) transparent;
 }
-.msg-user {
-    align-self:flex-end; background:rgba(238,29,35,.18);
-    border:1px solid rgba(238,29,35,.3); border-radius:14px 14px 2px 14px;
-    color:#fff; padding:9px 14px; font-size:.88rem; max-width:88%;
+.msg-you {
+    align-self: flex-end;
+    background: #ee1d23;
+    color: #fff;
+    border-radius: 18px 18px 4px 18px;
+    padding: 8px 14px;
+    font-size: .85rem;
+    max-width: 85%;
 }
 .msg-ai {
-    align-self:flex-start; background:rgba(255,255,255,.07);
-    border:1px solid rgba(255,255,255,.1); border-radius:14px 14px 14px 2px;
-    color:#fff; padding:9px 14px; font-size:.88rem; max-width:88%;
+    align-self: flex-start;
+    background: rgba(255,255,255,.1);
+    color: #fff;
+    border-radius: 18px 18px 18px 4px;
+    padding: 8px 14px;
+    font-size: .85rem;
+    max-width: 85%;
 }
-.msg-label { font-size:.7rem; opacity:.5; margin-bottom:3px; }
-.transfer-badge {
-    align-self:center; background:rgba(255,215,0,.15); border:1px solid rgba(255,215,0,.4);
-    color:#ffd700; border-radius:24px; padding:5px 14px; font-size:.78rem; font-weight:600;
+.msg-transfer {
+    align-self: center;
+    background: rgba(255,215,0,.15);
+    border: 1px solid rgba(255,215,0,.4);
+    color: #ffd700;
+    border-radius: 12px;
+    padding: 5px 14px;
+    font-size: .75rem;
+    font-weight: 600;
 }
 
 /* Input area */
-.input-area {
-    position:sticky; bottom:0;
-    background:rgba(8,12,31,.95); backdrop-filter:blur(12px);
-    border-top:1px solid rgba(255,255,255,.07);
-    padding:14px 16px 20px;
+.input-row {
+    padding: 10px 16px 4px;
+    border-top: 1px solid rgba(255,255,255,.07);
 }
-.end-call-wrap { display:flex; justify-content:center; padding:16px 0 24px; }
-.btn-end {
-    background:linear-gradient(135deg,#ef4444,#b91c1c);
-    color:#fff; border:none; border-radius:50%; width:60px; height:60px;
-    font-size:1.4rem; cursor:pointer;
-    box-shadow:0 0 24px rgba(239,68,68,.5);
-    transition:transform .15s;
-}
-.btn-end:hover{ transform:scale(1.08); }
-
-/* Hide Streamlit extras */
-.stSpinner > div { color:rgba(255,255,255,.6) !important; }
 div[data-testid="stTextInput"] input {
-    background:rgba(255,255,255,.07) !important;
-    border:1px solid rgba(255,255,255,.15) !important;
-    border-radius:10px !important; color:#fff !important;
+    background: rgba(255,255,255,.08) !important;
+    border: 1px solid rgba(255,255,255,.15) !important;
+    border-radius: 22px !important;
+    color: #fff !important;
+    font-size: .9rem !important;
+    padding: 8px 16px !important;
 }
-div[data-testid="stTextInput"] input::placeholder { color:rgba(255,255,255,.3) !important; }
+div[data-testid="stTextInput"] input::placeholder {
+    color: rgba(255,255,255,.3) !important;
+}
+div[data-testid="stTextInput"] label { display: none !important; }
+
+/* End call button */
+.end-row {
+    display: flex;
+    justify-content: center;
+    padding: 12px 0 4px;
+}
+.btn-end-call {
+    width: 64px; height: 64px; border-radius: 50%;
+    background: #ef4444; border: none; cursor: pointer;
+    font-size: 1.5rem; color: #fff;
+    box-shadow: 0 4px 20px rgba(239,68,68,.45);
+    transition: transform .15s;
+}
+.btn-end-call:hover { transform: scale(1.08); }
+
+/* Spinner */
+.stSpinner > div { color: rgba(255,255,255,.5) !important; }
+
+/* Streamlit default button overrides */
+div[data-testid="stButton"] button {
+    border-radius: 22px !important;
+    font-weight: 600 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────
-# JAVASCRIPT — Ring tone + Ambient + Interrupção
+# JAVASCRIPT — Ring tone (Web Audio) + Interrupção
 # ─────────────────────────────────────────────────────
 st.markdown("""
 <script>
-// ── Ring Tone (Web Audio API) ─────────────────────────
-window._clarinha_tocar_toque = function(cb) {
+// ── Ring tone ─────────────────────────────────────────
+window._clarinha_ring = function(onDone) {
     try {
         var ctx = new (window.AudioContext || window.webkitAudioContext)();
-        function ring(t) {
+        function playRing(startAt) {
             [440, 480].forEach(function(freq) {
                 var osc  = ctx.createOscillator();
                 var gain = ctx.createGain();
-                osc.connect(gain); gain.connect(ctx.destination);
-                osc.frequency.value = freq; osc.type = 'sine';
-                gain.gain.setValueAtTime(0, t);
-                gain.gain.linearRampToValueAtTime(0.28, t + 0.08);
-                gain.gain.setValueAtTime(0.28, t + 0.9);
-                gain.gain.linearRampToValueAtTime(0, t + 1.1);
-                osc.start(t); osc.stop(t + 1.2);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.type = 'sine';
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(0, startAt);
+                gain.gain.linearRampToValueAtTime(0.25, startAt + 0.08);
+                gain.gain.setValueAtTime(0.25, startAt + 0.85);
+                gain.gain.linearRampToValueAtTime(0, startAt + 1.0);
+                osc.start(startAt);
+                osc.stop(startAt + 1.1);
             });
         }
-        ring(ctx.currentTime + 0.2);
-        ring(ctx.currentTime + 2.2);
-        setTimeout(function(){ ctx.close(); if(cb) cb(); }, 4800);
-    } catch(e) { if(cb) setTimeout(cb, 4800); }
+        playRing(ctx.currentTime + 0.1);
+        playRing(ctx.currentTime + 2.3);
+        setTimeout(function() {
+            try { ctx.close(); } catch(e) {}
+            if (onDone) onDone();
+        }, 5000);
+    } catch(e) {
+        if (onDone) setTimeout(onDone, 5000);
+    }
 };
 
-// ── Ambient call center (pink noise) ─────────────────
-window._ambientRunning = false;
-window._ambientCtx = null;
-window._clarinha_iniciar_ambiente = function() {
-    if (window._ambientRunning) return;
+// ── Ambient (pink noise) ─────────────────────────────
+window._ambientStarted = false;
+window._clarinha_ambient = function() {
+    if (window._ambientStarted) return;
+    window._ambientStarted = true;
     try {
         var ctx = new (window.AudioContext || window.webkitAudioContext)();
-        window._ambientCtx = ctx;
-        var gain = ctx.createGain(); gain.gain.value = 0.035; gain.connect(ctx.destination);
-        var buf  = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
-        var d    = buf.getChannelData(0);
-        var b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+        var g = ctx.createGain(); g.gain.value = 0.03; g.connect(ctx.destination);
+        var buf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+        var d = buf.getChannelData(0);
+        var b=[0,0,0,0,0,0,0];
         for(var i=0;i<d.length;i++){
             var w=Math.random()*2-1;
-            b0=.99886*b0+w*.0555179; b1=.99332*b1+w*.0750759; b2=.96900*b2+w*.1538520;
-            b3=.86650*b3+w*.3104856; b4=.55000*b4+w*.5329522; b5=-.7616*b5-w*.0168980;
-            d[i]=(b0+b1+b2+b3+b4+b5+b6+w*.5362)/7; b6=w*.115926;
+            b[0]=.99886*b[0]+w*.0555179; b[1]=.99332*b[1]+w*.0750759;
+            b[2]=.96900*b[2]+w*.1538520; b[3]=.86650*b[3]+w*.3104856;
+            b[4]=.55000*b[4]+w*.5329522; b[5]=-.7616*b[5]-w*.0168980;
+            d[i]=(b[0]+b[1]+b[2]+b[3]+b[4]+b[5]+b[6]+w*.5362)/7; b[6]=w*.115926;
         }
-        var src = ctx.createBufferSource(); src.buffer=buf; src.loop=true;
-        src.connect(gain); src.start();
-        window._ambientRunning = true;
+        var src=ctx.createBufferSource(); src.buffer=buf; src.loop=true;
+        src.connect(g); src.start();
     } catch(e) {}
 };
 
-// ── Controle do áudio TTS ─────────────────────────────
-window._clarinaAudio = null;
-window._clarinhaParlando = false;
-
-window._clarinha_parar = function() {
-    if (window._clarinaAudio) {
-        window._clarinaAudio.pause();
-        window._clarinaAudio.currentTime = 0;
-        window._clarinaAudio = null;
+// ── TTS controls ────────────────────────────────────
+window._ttsAudio = null;
+window._ttsSpeaking = false;
+window._clarinha_stop_tts = function() {
+    if (window._ttsAudio) {
+        try { window._ttsAudio.pause(); window._ttsAudio.currentTime=0; } catch(e){}
+        window._ttsAudio = null;
     }
-    window._clarinhaParlando = false;
-    document.querySelectorAll('.avatar-ring-outer').forEach(function(el){
-        el.classList.remove('speaking');
-    });
-    document.querySelectorAll('.equalizer').forEach(function(el){
-        el.classList.remove('active');
-    });
-    var status = document.getElementById('speaking-status');
-    if (status) status.style.display = 'none';
+    window._ttsSpeaking = false;
+    document.querySelectorAll('.agent-avatar-wrap').forEach(function(e){ e.classList.remove('speaking'); });
+    document.querySelectorAll('.eq').forEach(function(e){ e.classList.remove('on'); });
 };
 
-// Para o áudio quando o microfone é ativado
+// Para TTS quando microfone é ativado
 var _origGUM = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-navigator.mediaDevices.getUserMedia = async function(c) {
-    if (c && c.audio) window._clarinha_parar();
+navigator.mediaDevices.getUserMedia = async function(c){
+    if(c && c.audio) window._clarinha_stop_tts();
     return _origGUM(c);
 };
 </script>
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────
-# INICIALIZAÇÃO DE APIs
+# INICIALIZAÇÃO DE APIS
 # ─────────────────────────────────────────────────────
 try:
     client_eleven = ElevenLabs(api_key=st.secrets["ELEVEN_API_KEY"])
@@ -337,67 +531,72 @@ try:
     bedrock           = boto3.client("bedrock-runtime", **aws_auth)
     s3_client         = boto3.client("s3",          **aws_auth)
     transcribe_client = boto3.client("transcribe",  **aws_auth)
-except Exception:
-    st.error("Secrets não configurados. Verifique ELEVEN_API_KEY, AWS_ACCESS_KEY e AWS_SECRET_KEY.")
+except Exception as e:
+    st.error(f"Erro nos Secrets: {e}")
     st.stop()
 
 # ─────────────────────────────────────────────────────
 # ESTADO DA SESSÃO
 # ─────────────────────────────────────────────────────
-defaults = {
-    "call_state":      "idle",    # idle | ringing | connected
-    "ring_start":      0.0,
+_defaults = {
+    "call_state":      "idle",      # idle | ringing | connected
     "call_start":      0.0,
-    "historico":       [],
+    "historico":       [],          # [{"u": str, "a": str}]  — "u" nunca vazio
     "saudacao_feita":  False,
     "perfil_cliente":  "prospect",
+    "last_mic_key":    None,        # evita reprocessar mesmo áudio
 }
-for k, v in defaults.items():
+for k, v in _defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
 
 # ─────────────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────────────
 
-def _avatar_html(speaking: bool = False) -> str:
-    speak_cls = "speaking" if speaking else ""
-    eq_cls    = "active"   if speaking else ""
-    bars = "".join(f'<span style="height:{h}px"></span>' for h in [6,14,20,24,18,14,8])
+def _avatar_inner(size_px: int = 120) -> str:
+    s = size_px
     if HAS_PHOTO:
-        inner = f'<img src="{CLARINHA_PHOTO}" class="avatar-img" alt="Clarinha"/>'
-    else:
-        inner = (
-            '<div class="avatar-placeholder">'
-            '<span style="font-size:3.5rem">👩‍💼</span>'
-            '<div class="headset-badge">🎧</div>'
-            '</div>'
-        )
-    status_style = "display:block" if speaking else "display:none"
+        return f'<img src="{CLARINHA_PHOTO}" class="agent-photo" style="width:{s}px;height:{s}px;" alt="Clarinha"/>'
+    # CSS avatar com emoji (substitua por <img> quando tiver a foto)
+    return (
+        f'<div class="agent-placeholder" style="width:{s}px;height:{s}px;">'
+        f'<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTIwIj48Y2lyY2xlIGN4PSI2MCIgY3k9IjQ1IiByPSIyNCIgZmlsbD0iI2ZmZiIgb3BhY2l0eT0iLjkiLz48ZWxsaXBzZSBjeD0iNjAiIGN5PSI5NSIgcng9IjM2IiByeT0iMjgiIGZpbGw9IiNmZmYiIG9wYWNpdHk9Ii45Ii8+PC9zdmc+" '
+        f'style="width:{s}px;height:{s}px;border-radius:50%;object-fit:cover;" alt="Clarinha"/>'
+        f'</div>'
+    )
+
+
+def _ios_statusbar() -> str:
+    now = time.strftime("%H:%M")
     return f"""
-    <div class="avatar-section">
-      <div class="avatar-ring-outer {speak_cls}">
-        {inner}
-      </div>
-      <div class="agent-name">{NOME_ASSISTENTE}</div>
-      <div class="agent-role">Assistente Virtual · Claro Pós-Venda</div>
-      <div class="equalizer {eq_cls}">{bars}</div>
-      <div id="speaking-status" style="{status_style}; color:rgba(255,255,255,.4); font-size:.75rem; margin-top:6px;">
-        falando...
+    <div class="dynamic-island">
+      <div class="di-speaker"></div>
+      <div class="di-camera"></div>
+    </div>
+    <div class="status-bar">
+      <span class="sb-time">{now}</span>
+      <div class="sb-icons">
+        <div class="sb-signal">
+          <span style="height:5px"></span>
+          <span style="height:8px"></span>
+          <span style="height:11px"></span>
+          <span style="height:14px"></span>
+        </div>
+        <span style="color:#fff;font-size:11px;">WiFi</span>
+        <div class="sb-battery">
+          <div class="sb-battery-fill"></div>
+        </div>
       </div>
     </div>
     """
 
 
-def _fmt_timer(seconds: float) -> str:
-    s = int(seconds)
-    return f"{s // 60:02d}:{s % 60:02d}"
-
-
 def transcrever_audio(audio_bytes: bytes) -> str | None:
-    job  = f"clarinha_{int(time.time())}"
-    bkt  = "audio-claro-poc-andy"
-    key  = f"{job}.webm"
+    job = f"clarinha_{int(time.time())}"
+    bkt = "audio-claro-poc-andy"
+    key = f"{job}.webm"
     try:
         s3_client.put_object(Bucket=bkt, Key=key, Body=audio_bytes)
         transcribe_client.start_transcription_job(
@@ -407,12 +606,12 @@ def transcrever_audio(audio_bytes: bytes) -> str | None:
             LanguageCode="pt-BR",
         )
         for _ in range(120):
-            status = transcribe_client.get_transcription_job(
+            st_ = transcribe_client.get_transcription_job(
                 TranscriptionJobName=job
             )["TranscriptionJob"]["TranscriptionJobStatus"]
-            if status == "COMPLETED":
+            if st_ == "COMPLETED":
                 break
-            if status == "FAILED":
+            if st_ == "FAILED":
                 return None
             time.sleep(1)
         url = transcribe_client.get_transcription_job(
@@ -430,107 +629,125 @@ def tocar_audio(texto: str):
             text=texto,
             voice_id="RGymW84CSmfVugnA5tvA",
             model_id="eleven_turbo_v2_5",
-            voice_settings={"stability": 0.50, "similarity_boost": 0.85,
-                            "style": 0.30, "use_speaker_boost": True},
+            voice_settings={
+                "stability": 0.50, "similarity_boost": 0.85,
+                "style": 0.30, "use_speaker_boost": True,
+            },
         )
         b64 = base64.b64encode(b"".join(chunks)).decode()
         st.markdown(f"""
-        <audio id="tts-audio" autoplay
-               onplay="
-                   window._clarinaAudio=this; window._clarinhaParlando=true;
-                   document.querySelectorAll('.avatar-ring-outer').forEach(e=>e.classList.add('speaking'));
-                   document.querySelectorAll('.equalizer').forEach(e=>e.classList.add('active'));
-                   var s=document.getElementById('speaking-status'); if(s) s.style.display='block';
-                   window._clarinha_iniciar_ambiente && window._clarinha_iniciar_ambiente();
-               "
-               onended="window._clarinha_parar();">
+        <audio id="tts-{int(time.time()*1000)}" autoplay
+          onplay="
+            window._ttsAudio=this; window._ttsSpeaking=true;
+            document.querySelectorAll('.agent-avatar-wrap').forEach(e=>e.classList.add('speaking'));
+            document.querySelectorAll('.eq').forEach(e=>e.classList.add('on'));
+            window._clarinha_ambient && window._clarinha_ambient();
+          "
+          onended="window._clarinha_stop_tts();">
           <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
         </audio>
-        <script>
-          (function(){{
-            var a=document.getElementById('tts-audio');
-            window._clarinaAudio=a; window._clarinhaParlando=true;
-          }})();
-        </script>
         """, unsafe_allow_html=True)
     except Exception as e:
         st.error(f"ElevenLabs: {e}")
 
 
+def _chamar_bedrock(msgs: list, ctx_extra: str = "") -> str:
+    """Tenta modelos em ordem de preferência."""
+    body_data = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 600,
+        "system": SYSTEM_PROMPT + ctx_extra,
+        "messages": msgs,
+    }
+    for model_id in BEDROCK_MODELS:
+        try:
+            r = bedrock.invoke_model(
+                modelId=model_id,
+                body=json.dumps(body_data),
+            )
+            return json.loads(r["body"].read())["content"][0]["text"]
+        except Exception:
+            continue
+    raise RuntimeError("Nenhum modelo Bedrock disponível")
+
+
 def obter_resposta(pergunta: str) -> tuple[str, bool]:
+    # Guardrail de entrada
     av = classificar_input(pergunta)
     if av["resposta_guardrail"]:
         return av["resposta_guardrail"], False
 
+    # Contexto extra para perguntas residenciais
     ctx_extra = ""
-    if any(p in pergunta.lower() for p in ["internet","fibra","tv","residencial","gpon","mega","instalação"]):
+    if any(p in pergunta.lower() for p in ["internet","fibra","tv","residencial","gpon","mega"]):
         ctx_extra = "\n\n" + resumo_para_contexto(st.session_state.perfil_cliente)
 
+    # Monta histórico — NUNCA inclui turnos com "u" vazio
     msgs = []
     for t in st.session_state.historico:
-        msgs.append({"role": "user",      "content": t["u"]})
-        msgs.append({"role": "assistant", "content": t["a"]})
+        if t["u"]:  # pula a saudação inicial (u vazio)
+            msgs.append({"role": "user",      "content": t["u"]})
+            msgs.append({"role": "assistant",  "content": t["a"]})
     msgs.append({"role": "user", "content": pergunta})
 
     try:
-        body = json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 600,
-            "system": SYSTEM_PROMPT + ctx_extra,
-            "messages": msgs,
-        })
-        r = bedrock.invoke_model(
-            modelId="anthropic.claude-3-5-sonnet-20241022-v2:0", body=body
-        )
-        resp = json.loads(r["body"].read())["content"][0]["text"]
+        resp = _chamar_bedrock(msgs, ctx_extra)
     except Exception:
+        # Fallback humanizado quando Bedrock indisponível
         p = pergunta.lower()
         if "endereç" in p:
-            resp = "Entendo! Por segurança, o endereço não pode ser alterado após o pedido. Posso te orientar a cancelar e refazer."
+            resp = "Entendo! Por segurança, não é possível alterar o endereço após o pedido ser gerado. Posso orientar sobre o cancelamento e novo pedido, tudo bem?"
         elif "instalação" in p or "técnico" in p:
-            resp = "Você pode reagendar sua visita pelo app Minha Claro Residencial, em Minhas Visitas. Posso ajudar com mais algo?"
-        elif "chip" in p or "esim" in p:
-            resp = "A ativação leva até 48 horas após o recebimento. A portabilidade ocorre logo depois da ativação."
+            resp = "Você pode consultar ou reagendar sua visita técnica pelo app Minha Claro Residencial, em Minhas Visitas. Posso ajudar com mais alguma coisa?"
+        elif "chip" in p or "esim" in p or "e-sim" in p:
+            resp = "A ativação do chip ou eSIM leva até 48 horas após o recebimento. A portabilidade ocorre logo depois. Precisa de mais informações?"
+        elif "fatura" in p or "boleto" in p or "cobrança" in p:
+            resp = "Você pode consultar sua fatura pelo app Minha Claro ou pelo site claro.com.br. Posso te conectar com nosso time financeiro se precisar."
+        elif "cancelar" in p or "cancelamento" in p:
+            resp = "Entendo. Para cancelamentos, preciso te conectar com um especialista que poderá avaliar as melhores opções para você."
         else:
-            resp = "Estou aqui para ajudar! Pode me contar mais sobre sua dúvida?"
+            resp = "Claro! Estou aqui para te ajudar. Pode me contar mais detalhes sobre sua dúvida para eu te auxiliar melhor?"
 
     resp = sanitizar_resposta(resp)
     return resp, deve_transferir_humano(resp)
 
 
 # ─────────────────────────────────────────────────────
-# ═══════════════ TELA: IDLE ══════════════════════════
+# ══════════════ TELA: IDLE ═══════════════════════════
 # ─────────────────────────────────────────────────────
 if st.session_state.call_state == "idle":
+
+    st.markdown(_ios_statusbar(), unsafe_allow_html=True)
+
+    avatar_idle = ""
+    if HAS_PHOTO:
+        avatar_idle = f'<img src="{CLARINHA_PHOTO}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" alt="Clarinha"/>'
+    else:
+        avatar_idle = "👩‍💼"
+
     st.markdown(f"""
     <div class="idle-screen">
-      <div class="brand-badge">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="#ff6b6b">
-          <circle cx="7" cy="7" r="7"/>
-        </svg>
-        VOICE IA · CLARO
-      </div>
-      <div class="voiceia-title">Voice<span>IA</span></div>
-      <div class="idle-subtitle">A Revolução no Atendimento E-commerce da Claro</div>
-
-      <div class="number-display">
-        <div class="number-label">Central de Pós-Venda</div>
-        <div class="number-value">{NUMERO_CLARO}</div>
-        <div class="number-sub">E-commerce · Celular · Residencial · Acessórios</div>
+      <div style="margin-bottom:4px;">
+        <div class="phone-contact-avatar">{avatar_idle}</div>
+        <div class="phone-contact-name">{NOME_ASSISTENTE}</div>
+        <div style="color:rgba(255,255,255,.5);font-size:.82rem;margin-bottom:2px;">Claro Pós-Venda</div>
+        <div class="phone-dialer-header">Central de Atendimento</div>
+        <div class="phone-number-display">{NUMERO_CLARO}</div>
+        <div style="color:rgba(255,255,255,.35);font-size:.75rem;">E-commerce · Celular · Residencial</div>
       </div>
 
-      <div class="stats-row">
-        <div class="stat-card">
-          <div class="stat-value">24/7</div>
-          <div class="stat-label">Disponível</div>
+      <div class="dialer-actions" style="margin:24px 0;">
+        <div style="text-align:center;">
+          <div class="dialer-action-btn">🔇</div>
+          <div class="dialer-action-label">Silenciar</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-value">~5 min</div>
-          <div class="stat-label">TMO Médio</div>
+        <div style="text-align:center;">
+          <div class="dialer-action-btn">⌨️</div>
+          <div class="dialer-action-label">Teclado</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-value">100%</div>
-          <div class="stat-label">Satisfação</div>
+        <div style="text-align:center;">
+          <div class="dialer-action-btn">🔊</div>
+          <div class="dialer-action-label">Alto-falante</div>
         </div>
       </div>
     </div>
@@ -538,86 +755,117 @@ if st.session_state.call_state == "idle":
 
     col = st.columns([1, 2, 1])[1]
     with col:
-        if st.button("📞  Ligar para a Claro", use_container_width=True, type="primary"):
+        if st.button("📞  Ligar", key="btn_ligar", use_container_width=True, type="primary"):
             st.session_state.call_state = "ringing"
-            st.session_state.ring_start = time.time()
             st.rerun()
 
+    st.markdown('<div class="home-indicator"></div>', unsafe_allow_html=True)
+
+    # Sidebar
+    with st.sidebar:
+        st.selectbox("Perfil", ["prospect", "base"], key="perfil_cliente")
+
 
 # ─────────────────────────────────────────────────────
-# ═══════════════ TELA: RINGING ═══════════════════════
+# ══════════════ TELA: RINGING ════════════════════════
 # ─────────────────────────────────────────────────────
 elif st.session_state.call_state == "ringing":
-    elapsed = time.time() - st.session_state.ring_start
+
+    st.markdown(_ios_statusbar(), unsafe_allow_html=True)
+
+    avatar_ring = (
+        f'<img src="{CLARINHA_PHOTO}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" alt="Clarinha"/>'
+        if HAS_PHOTO else "👩‍💼"
+    )
 
     st.markdown(f"""
-    <div class="ring-screen">
-      <div class="ring-company">CLARO BRASIL</div>
-      <div class="ring-number">{NUMERO_CLARO}</div>
-      <div class="ring-type">Pós-Venda E-commerce</div>
-
-      <div class="ring-avatar-wrap">
-        <div class="ring-avatar">🎧</div>
-      </div>
-
-      <div class="ring-status">Chamando</div>
-      <div class="ring-dots">
-        <span></span><span></span><span></span>
+    <div class="ringing-screen">
+      <div>
+        <div style="color:rgba(255,255,255,.55);font-size:.82rem;margin-bottom:6px;">Claro Pós-Venda</div>
+        <div class="ringing-contact-name">{NOME_ASSISTENTE}</div>
+        <div class="ringing-status" id="ring-status-text">Chamando...</div>
+        <div class="ringing-avatar">{avatar_ring}</div>
+        <div style="color:rgba(255,255,255,.45);font-size:.85rem;">{NUMERO_CLARO}</div>
       </div>
     </div>
+
+    <script>
+    (function() {{
+        // Toca o sinal apenas uma vez por sessão de ringing
+        if (sessionStorage.getItem('ring_done')) return;
+        sessionStorage.setItem('ring_done', '1');
+
+        var ringFn = function() {{
+            if (typeof window._clarinha_ring === 'function') {{
+                window._clarinha_ring(function() {{
+                    // Após 2 toques, auto-clica o botão "Atender"
+                    var tries = 0;
+                    function clickAtender() {{
+                        var btns = document.querySelectorAll('button');
+                        for (var i = 0; i < btns.length; i++) {{
+                            if (btns[i].textContent.includes('Atender')) {{
+                                btns[i].click();
+                                return;
+                            }}
+                        }}
+                        if (++tries < 30) setTimeout(clickAtender, 200);
+                    }}
+                    clickAtender();
+                }});
+            }} else {{
+                setTimeout(ringFn, 200);
+            }}
+        }};
+        ringFn();
+    }})();
+    </script>
     """, unsafe_allow_html=True)
 
-    # Toca o toque na primeira vez (elapsed < 0.5s)
-    if elapsed < 0.5:
-        st.markdown("""
-        <script>
-        (function(){
-            var tries = 0;
-            function tryPlay() {
-                if (typeof window._clarinha_tocar_toque === 'function') {
-                    window._clarinha_tocar_toque();
-                } else if (tries++ < 20) {
-                    setTimeout(tryPlay, 200);
-                }
-            }
-            tryPlay();
-        })();
-        </script>
-        """, unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col1:
+        if st.button("📵 Recusar", key="btn_recusar", use_container_width=True):
+            # Limpa flag para próxima chamada
+            st.session_state.call_state = "idle"
+            st.markdown("<script>sessionStorage.removeItem('ring_done');</script>",
+                        unsafe_allow_html=True)
+            st.rerun()
+    with col3:
+        if st.button("📞 Atender", key="btn_atender", use_container_width=True, type="primary"):
+            st.session_state.call_state  = "connected"
+            st.session_state.call_start  = time.time()
+            st.session_state.saudacao_feita = False
+            st.markdown("<script>sessionStorage.removeItem('ring_done');</script>",
+                        unsafe_allow_html=True)
+            st.rerun()
 
-    # Auto-conecta após ~5 segundos (2 toques)
-    if elapsed >= 5.0:
-        st.session_state.call_state = "connected"
-        st.session_state.call_start = time.time()
-        st.session_state.saudacao_feita = False
-        st.rerun()
-    else:
-        time.sleep(0.4)
-        st.rerun()
+    st.markdown('<div class="home-indicator"></div>', unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────────────
-# ═══════════════ TELA: CONNECTED ═════════════════════
+# ══════════════ TELA: CONNECTED ══════════════════════
 # ─────────────────────────────────────────────────────
 elif st.session_state.call_state == "connected":
+
     elapsed_call = time.time() - st.session_state.call_start
+
+    st.markdown(_ios_statusbar(), unsafe_allow_html=True)
 
     # ── Header da chamada ──────────────────────────────
     st.markdown(f"""
     <div class="call-header">
-      <div>
-        <span class="call-status-dot"></span>
-        <span class="call-status-text">Em chamada · {NUMERO_CLARO}</span>
+      <div class="call-status">
+        <span class="call-dot"></span>
+        <span class="call-label">Em chamada</span>
       </div>
-      <div class="call-timer" id="call-timer">{_fmt_timer(elapsed_call)}</div>
+      <span class="call-timer" id="call-timer">{int(elapsed_call//60):02d}:{int(elapsed_call%60):02d}</span>
     </div>
     <script>
     (function(){{
-        var start = Date.now() - {int(elapsed_call * 1000)};
-        function tick() {{
-            var s = Math.floor((Date.now()-start)/1000);
+        var s = Date.now() - {int(elapsed_call*1000)};
+        function tick(){{
+            var t = Math.floor((Date.now()-s)/1000);
             var el = document.getElementById('call-timer');
-            if(el) el.textContent = String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');
+            if(el) el.textContent = String(Math.floor(t/60)).padStart(2,'0')+':'+String(t%60).padStart(2,'0');
             setTimeout(tick, 500);
         }}
         tick();
@@ -626,57 +874,74 @@ elif st.session_state.call_state == "connected":
     """, unsafe_allow_html=True)
 
     # ── Avatar da Clarinha ─────────────────────────────
-    st.markdown(_avatar_html(speaking=False), unsafe_allow_html=True)
+    eq_bars = "".join(f'<span style="height:{h}px"></span>' for h in [4,10,18,22,16,12,6])
+    st.markdown(f"""
+    <div class="agent-section">
+      <div class="agent-avatar-wrap" id="avatar-wrap">
+        {_avatar_inner(120)}
+        <div class="headset-pill">🎧 ao vivo</div>
+      </div>
+      <div class="agent-name">{NOME_ASSISTENTE}</div>
+      <div class="agent-role">Assistente Virtual · Claro Pós-Venda</div>
+      <div class="eq" id="eq-bar">{eq_bars}</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # ── Saudação inicial (uma vez) ─────────────────────
+    # ── Saudação inicial ───────────────────────────────
     if not st.session_state.saudacao_feita:
-        st.session_state.historico.append({"u": "", "a": SAUDACAO_INICIAL})
+        # NÃO adiciona ao histórico com "u" vazio — guarda separado
         st.session_state.saudacao_feita = True
         tocar_audio(SAUDACAO_INICIAL)
+        st.session_state.historico.append({"u": "", "a": SAUDACAO_INICIAL})
 
-    # ── Histórico de conversa ──────────────────────────
-    chat_msgs = ""
-    for turno in st.session_state.historico:
-        if turno["u"]:
-            chat_msgs += f'<div class="msg-user"><div class="msg-label">Você</div>{turno["u"]}</div>'
-        if turno["a"]:
-            chat_msgs += f'<div class="msg-ai"><div class="msg-label">{NOME_ASSISTENTE}</div>{turno["a"]}</div>'
+    # ── Chat ───────────────────────────────────────────
+    msgs_html = ""
+    for t in st.session_state.historico:
+        if t["a"] and not t["u"]:  # saudação inicial
+            msgs_html += f'<div class="msg-ai">{t["a"]}</div>'
+        else:
+            if t["u"]:
+                msgs_html += f'<div class="msg-you">{t["u"]}</div>'
+            if t["a"]:
+                msgs_html += f'<div class="msg-ai">{t["a"]}</div>'
 
-    if chat_msgs:
-        st.markdown(f'<div class="chat-box" id="chat-box">{chat_msgs}</div>', unsafe_allow_html=True)
-        st.markdown("""
+    if msgs_html:
+        st.markdown(f"""
+        <div class="chat-area" id="chat">{msgs_html}</div>
         <script>
-        (function(){ var c=document.getElementById('chat-box'); if(c) c.scrollTop=c.scrollHeight; })();
-        </script>""", unsafe_allow_html=True)
+        (function(){{ var c=document.getElementById('chat'); if(c) c.scrollTop=c.scrollHeight; }})();
+        </script>
+        """, unsafe_allow_html=True)
 
-    # ── Área de input ──────────────────────────────────
-    st.markdown('<div class="input-area">', unsafe_allow_html=True)
+    # ── Input ──────────────────────────────────────────
+    st.markdown('<div class="input-row">', unsafe_allow_html=True)
 
-    st.markdown("**🎙️ Falar**")
     audio = mic_recorder(
-        start_prompt="🔴 Iniciar",
+        start_prompt="🔴 Gravar",
         stop_prompt="🟢 Enviar",
-        key="mic",
+        key="mic_rec",
     )
 
-    col1, col2 = st.columns([4, 1])
-    with col1:
-        texto = st.text_input("", placeholder="Digite sua dúvida...", label_visibility="collapsed")
-    with col2:
+    c1, c2 = st.columns([5, 1])
+    with c1:
+        texto = st.text_input("Mensagem", placeholder="Digite sua mensagem...",
+                              label_visibility="collapsed")
+    with c2:
         enviar = st.button("↩", use_container_width=True)
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ── Processamento ──────────────────────────────────
+    # ── Processamento (sem reprocessar o mesmo áudio) ──
     pergunta = None
 
     if audio:
-        with st.spinner("Transcrevendo..."):
-            pergunta = transcrever_audio(audio["bytes"])
-            if pergunta:
-                st.success(f"🗣 **{pergunta}**")
-            else:
-                st.warning("Áudio não entendido. Tente novamente.")
+        audio_id = id(audio["bytes"])
+        if audio_id != st.session_state.last_mic_key:
+            st.session_state.last_mic_key = audio_id
+            with st.spinner("Transcrevendo..."):
+                pergunta = transcrever_audio(audio["bytes"])
+                if not pergunta:
+                    st.warning("Não entendi o áudio. Tente novamente.")
 
     elif enviar and texto.strip():
         pergunta = texto.strip()
@@ -688,29 +953,26 @@ elif st.session_state.call_state == "connected":
         st.session_state.historico.append({"u": pergunta, "a": resposta})
 
         if transferir:
-            st.markdown(
-                '<div class="transfer-badge">⚡ Transferindo para especialista...</div>',
-                unsafe_allow_html=True,
-            )
+            st.markdown('<div class="msg-transfer">⚡ Transferindo para especialista...</div>',
+                        unsafe_allow_html=True)
             tocar_audio(RESPOSTA_TRANSFERENCIA)
         else:
             tocar_audio(resposta)
 
         st.rerun()
 
-    # ── Botão encerrar chamada ─────────────────────────
-    st.markdown('<div class="end-call-wrap">', unsafe_allow_html=True)
-    if st.button("📵", key="btn_encerrar", help="Encerrar chamada"):
-        st.session_state.call_state = "idle"
-        st.session_state.historico  = []
+    # ── Encerrar chamada ───────────────────────────────
+    st.markdown('<div class="end-row">', unsafe_allow_html=True)
+    if st.button("📵", key="btn_end", help="Encerrar chamada"):
+        st.session_state.call_state    = "idle"
+        st.session_state.historico     = []
         st.session_state.saudacao_feita = False
+        st.session_state.last_mic_key  = None
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Sidebar oculta com config
+    st.markdown('<div class="home-indicator"></div>', unsafe_allow_html=True)
+
     with st.sidebar:
-        st.markdown("### Configurações")
-        st.session_state.perfil_cliente = st.selectbox(
-            "Perfil do cliente", ["prospect", "base"]
-        )
-        st.caption("prospect = novo cliente | base = já é cliente Claro")
+        st.selectbox("Perfil do cliente", ["prospect", "base"], key="perfil_cliente")
+        st.caption("prospect = novo | base = já cliente")
