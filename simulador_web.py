@@ -554,6 +554,7 @@ _defaults = {
     "saudacao_feita":  False,
     "perfil_cliente":  "prospect",
     "last_mic_key":    None,        # evita reprocessar mesmo áudio
+    "ring_count":      0,           # ID único por chamada — garante ring fresco
 }
 for k, v in _defaults.items():
     if k not in st.session_state:
@@ -603,6 +604,29 @@ def _ios_statusbar() -> str:
 
 
 def transcrever_audio(audio_bytes: bytes) -> str | None:
+    """
+    Transcrição em 2 tentativas:
+      1. ElevenLabs Scribe STT  → rápido (~2-3s), suporta webm nativamente
+      2. Amazon Transcribe       → fallback (~20-30s) se Scribe falhar
+    """
+    import io
+
+    # ── 1. ElevenLabs Scribe (rápido) ─────────────────────────────────────
+    try:
+        buf = io.BytesIO(audio_bytes)
+        buf.name = "audio.webm"          # hint de formato para a API
+        result = client_eleven.speech_to_text.convert(
+            audio=buf,
+            model_id="scribe_v1",
+            language_code="pt",          # força português
+        )
+        texto = (result.text or "").strip()
+        if texto:
+            return texto
+    except Exception:
+        pass  # cai no fallback silenciosamente
+
+    # ── 2. Amazon Transcribe (fallback) ────────────────────────────────────
     job = f"clarinha_{int(time.time())}"
     bkt = "audio-claro-poc-andy"
     key = f"{job}.webm"
@@ -614,7 +638,7 @@ def transcrever_audio(audio_bytes: bytes) -> str | None:
             MediaFormat="webm",
             LanguageCode="pt-BR",
         )
-        for _ in range(120):
+        for _ in range(60):          # máx 60s (era 120s)
             st_ = transcribe_client.get_transcription_job(
                 TranscriptionJobName=job
             )["TranscriptionJob"]["TranscriptionJobStatus"]
@@ -628,7 +652,7 @@ def transcrever_audio(audio_bytes: bytes) -> str | None:
         )["TranscriptionJob"]["Transcript"]["TranscriptFileUri"]
         return requests.get(url).json()["results"]["transcripts"][0]["transcript"]
     except Exception as e:
-        st.error(f"Transcribe: {e}")
+        st.error(f"Transcrição falhou: {e}")
         return None
 
 
@@ -664,7 +688,7 @@ def _chamar_bedrock(msgs: list, ctx_extra: str = "") -> str:
     """Tenta modelos em ordem de preferência."""
     body_data = {
         "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 600,
+        "max_tokens": 180,   # voz precisa de respostas curtas e rápidas
         "system": SYSTEM_PROMPT + ctx_extra,
         "messages": msgs,
     }
@@ -736,50 +760,39 @@ if st.session_state.call_state == "idle":
 
     st.markdown(f"""
     <div class="idle-screen">
-      <div style="margin-bottom:4px;">
+      <div style="text-align:center; padding-top: 20px;">
         <div class="phone-contact-avatar">{avatar_idle}</div>
         <div class="phone-contact-name">{NOME_ASSISTENTE}</div>
-        <div style="color:rgba(255,255,255,.5);font-size:.82rem;margin-bottom:2px;">Claro Pós-Venda</div>
-        <div class="phone-dialer-header">Central de Atendimento</div>
-        <div class="phone-number-display">{NUMERO_CLARO}</div>
-        <div style="color:rgba(255,255,255,.35);font-size:.75rem;">E-commerce · Celular · Residencial</div>
-      </div>
-
-      <div class="dialer-actions" style="margin:24px 0;">
-        <div style="text-align:center;">
-          <div class="dialer-action-btn">🔇</div>
-          <div class="dialer-action-label">Silenciar</div>
-        </div>
-        <div style="text-align:center;">
-          <div class="dialer-action-btn">⌨️</div>
-          <div class="dialer-action-label">Teclado</div>
-        </div>
-        <div style="text-align:center;">
-          <div class="dialer-action-btn">🔊</div>
-          <div class="dialer-action-label">Alto-falante</div>
-        </div>
+        <div style="color:rgba(255,255,255,.5);font-size:.85rem;margin-top:4px;">Claro Pós-Venda</div>
+        <div class="phone-number-display" style="margin-top:16px;">{NUMERO_CLARO}</div>
       </div>
     </div>
     """, unsafe_allow_html=True)
 
-    # CSS centraliza o botão sem depender de columns (funciona em qualquer largura)
+    # Botão Ligar — centralizado, estilo iOS call button
     st.markdown("""
     <style>
-    div[data-testid="stButton"]:has(button[kind="primary"]) {
-        display: flex; justify-content: center;
+    /* Centraliza e estiliza o botão Ligar em qualquer largura */
+    div[data-testid="stButton"] {
+        display: flex !important;
+        justify-content: center !important;
     }
-    div[data-testid="stButton"]:has(button[kind="primary"]) button {
-        width: 160px !important;
-        border-radius: 36px !important;
+    div[data-testid="stButton"] button[kind="primary"] {
+        width: 180px !important;
+        border-radius: 40px !important;
         background: #22c55e !important;
         border-color: #22c55e !important;
-        font-size: 1rem !important;
-        padding: 12px 0 !important;
+        font-size: 1.05rem !important;
+        font-weight: 700 !important;
+        padding: 14px 0 !important;
+        letter-spacing: .03em !important;
+        box-shadow: 0 4px 24px rgba(34,197,94,.45) !important;
     }
     </style>
     """, unsafe_allow_html=True)
     if st.button("📞  Ligar", key="btn_ligar", type="primary"):
         st.session_state.call_state = "ringing"
+        st.session_state.ring_count += 1   # chave única → ring sempre toca
         st.rerun()
 
     st.markdown('<div class="home-indicator"></div>', unsafe_allow_html=True)
@@ -801,6 +814,8 @@ elif st.session_state.call_state == "ringing":
         if (HAS_PHOTO and _PHOTO_URI) else "👩‍💼"
     )
 
+    _rc = st.session_state.ring_count   # chave única por chamada
+
     st.markdown(f"""
     <div class="ringing-screen">
       <div>
@@ -814,32 +829,53 @@ elif st.session_state.call_state == "ringing":
 
     <script>
     (function() {{
-        // Toca o sinal apenas uma vez por sessão de ringing
-        if (sessionStorage.getItem('ring_done')) return;
-        sessionStorage.setItem('ring_done', '1');
+        // Chave única por chamada — garante que o ring toca sempre que usuário apertar Ligar
+        var ringKey = 'ring_{_rc}';
+        if (sessionStorage.getItem(ringKey)) return;
+        sessionStorage.setItem(ringKey, '1');
 
-        var ringFn = function() {{
-            if (typeof window._clarinha_ring === 'function') {{
-                window._clarinha_ring(function() {{
-                    // Após 2 toques, auto-clica o botão "Atender"
-                    var tries = 0;
-                    function clickAtender() {{
-                        var btns = document.querySelectorAll('button');
-                        for (var i = 0; i < btns.length; i++) {{
-                            if (btns[i].textContent.includes('Atender')) {{
-                                btns[i].click();
-                                return;
-                            }}
-                        }}
-                        if (++tries < 30) setTimeout(clickAtender, 200);
-                    }}
-                    clickAtender();
-                }});
-            }} else {{
-                setTimeout(ringFn, 200);
+        // Ring tone auto-contido (não depende de função global)
+        function playRing(onDone) {{
+            try {{
+                var ctx = new (window.AudioContext || window.webkitAudioContext)();
+                function tone(startAt) {{
+                    [440, 480].forEach(function(freq) {{
+                        var osc  = ctx.createOscillator();
+                        var gain = ctx.createGain();
+                        osc.connect(gain); gain.connect(ctx.destination);
+                        osc.type = 'sine'; osc.frequency.value = freq;
+                        gain.gain.setValueAtTime(0, startAt);
+                        gain.gain.linearRampToValueAtTime(0.28, startAt + 0.08);
+                        gain.gain.setValueAtTime(0.28, startAt + 0.85);
+                        gain.gain.linearRampToValueAtTime(0, startAt + 1.0);
+                        osc.start(startAt); osc.stop(startAt + 1.1);
+                    }});
+                }}
+                tone(ctx.currentTime + 0.1);
+                tone(ctx.currentTime + 2.3);
+                setTimeout(function() {{
+                    try {{ ctx.close(); }} catch(e) {{}}
+                    if (onDone) onDone();
+                }}, 5000);
+            }} catch(e) {{
+                if (onDone) setTimeout(onDone, 5000);
             }}
-        }};
-        ringFn();
+        }}
+
+        playRing(function() {{
+            // Após os 2 toques: auto-clica "Atender"
+            var tries = 0;
+            function clickAtender() {{
+                var btns = document.querySelectorAll('button');
+                for (var i = 0; i < btns.length; i++) {{
+                    if (btns[i].textContent.includes('Atender')) {{
+                        btns[i].click(); return;
+                    }}
+                }}
+                if (++tries < 30) setTimeout(clickAtender, 200);
+            }}
+            clickAtender();
+        }});
     }})();
     </script>
     """, unsafe_allow_html=True)
@@ -847,18 +883,13 @@ elif st.session_state.call_state == "ringing":
     col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
         if st.button("📵 Recusar", key="btn_recusar", use_container_width=True):
-            # Limpa flag para próxima chamada
             st.session_state.call_state = "idle"
-            st.markdown("<script>sessionStorage.removeItem('ring_done');</script>",
-                        unsafe_allow_html=True)
             st.rerun()
     with col3:
         if st.button("📞 Atender", key="btn_atender", use_container_width=True, type="primary"):
-            st.session_state.call_state  = "connected"
-            st.session_state.call_start  = time.time()
+            st.session_state.call_state     = "connected"
+            st.session_state.call_start     = time.time()
             st.session_state.saudacao_feita = False
-            st.markdown("<script>sessionStorage.removeItem('ring_done');</script>",
-                        unsafe_allow_html=True)
             st.rerun()
 
     st.markdown('<div class="home-indicator"></div>', unsafe_allow_html=True)
@@ -884,6 +915,7 @@ elif st.session_state.call_state == "connected":
     </div>
     <script>
     (function(){{
+        // Timer
         var s = Date.now() - {int(elapsed_call*1000)};
         function tick(){{
             var t = Math.floor((Date.now()-s)/1000);
@@ -892,6 +924,27 @@ elif st.session_state.call_state == "connected":
             setTimeout(tick, 500);
         }}
         tick();
+
+        // Som ambiente call center — inicia ao entrar na chamada (não só no TTS)
+        if (!window._ambientStarted) {{
+            window._ambientStarted = true;
+            try {{
+                var actx = new (window.AudioContext || window.webkitAudioContext)();
+                var gn = actx.createGain(); gn.gain.value = 0.025; gn.connect(actx.destination);
+                var buf = actx.createBuffer(1, actx.sampleRate * 2, actx.sampleRate);
+                var d = buf.getChannelData(0);
+                var b=[0,0,0,0,0,0,0];
+                for(var i=0;i<d.length;i++){{
+                    var w=Math.random()*2-1;
+                    b[0]=.99886*b[0]+w*.0555179; b[1]=.99332*b[1]+w*.0750759;
+                    b[2]=.96900*b[2]+w*.1538520; b[3]=.86650*b[3]+w*.3104856;
+                    b[4]=.55000*b[4]+w*.5329522; b[5]=-.7616*b[5]-w*.0168980;
+                    d[i]=(b[0]+b[1]+b[2]+b[3]+b[4]+b[5]+b[6]+w*.5362)/7; b[6]=w*.115926;
+                }}
+                var src=actx.createBufferSource(); src.buffer=buf; src.loop=true;
+                src.connect(gn); src.start();
+            }} catch(e) {{}}
+        }}
     }})();
     </script>
     """, unsafe_allow_html=True)
