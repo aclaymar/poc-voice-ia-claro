@@ -25,9 +25,18 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-NUMERO_CLARO  = "0800 738 0001"
+NUMERO_CLARO   = "0800 738 0001"
 CLARINHA_PHOTO = "img/clarinha.png"
-HAS_PHOTO = os.path.exists(CLARINHA_PHOTO)
+HAS_PHOTO      = os.path.exists(CLARINHA_PHOTO)
+
+# Pré-carrega a foto como base64 para funcionar no Streamlit Cloud
+# (st.markdown com <img src="path"> não acessa o filesystem do servidor)
+_PHOTO_B64 = ""
+_PHOTO_URI = ""
+if HAS_PHOTO:
+    with open(CLARINHA_PHOTO, "rb") as _f:
+        _PHOTO_B64 = base64.b64encode(_f.read()).decode()
+    _PHOTO_URI = f"data:image/png;base64,{_PHOTO_B64}"
 
 # Modelos Bedrock em ordem de preferência
 BEDROCK_MODELS = [
@@ -557,9 +566,9 @@ for k, v in _defaults.items():
 
 def _avatar_inner(size_px: int = 120) -> str:
     s = size_px
-    if HAS_PHOTO:
-        return f'<img src="{CLARINHA_PHOTO}" class="agent-photo" style="width:{s}px;height:{s}px;" alt="Clarinha"/>'
-    # CSS avatar com emoji (substitua por <img> quando tiver a foto)
+    if HAS_PHOTO and _PHOTO_URI:
+        return f'<img src="{_PHOTO_URI}" class="agent-photo" style="width:{s}px;height:{s}px;" alt="Clarinha"/>'
+    # CSS avatar fallback quando não há foto
     return (
         f'<div class="agent-placeholder" style="width:{s}px;height:{s}px;">'
         f'<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgMTIwIj48Y2lyY2xlIGN4PSI2MCIgY3k9IjQ1IiByPSIyNCIgZmlsbD0iI2ZmZiIgb3BhY2l0eT0iLjkiLz48ZWxsaXBzZSBjeD0iNjAiIGN5PSI5NSIgcng9IjM2IiByeT0iMjgiIGZpbGw9IiNmZmYiIG9wYWNpdHk9Ii45Ii8+PC9zdmc+" '
@@ -720,8 +729,8 @@ if st.session_state.call_state == "idle":
     st.markdown(_ios_statusbar(), unsafe_allow_html=True)
 
     avatar_idle = ""
-    if HAS_PHOTO:
-        avatar_idle = f'<img src="{CLARINHA_PHOTO}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" alt="Clarinha"/>'
+    if HAS_PHOTO and _PHOTO_URI:
+        avatar_idle = f'<img src="{_PHOTO_URI}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" alt="Clarinha"/>'
     else:
         avatar_idle = "👩‍💼"
 
@@ -753,11 +762,25 @@ if st.session_state.call_state == "idle":
     </div>
     """, unsafe_allow_html=True)
 
-    col = st.columns([1, 2, 1])[1]
-    with col:
-        if st.button("📞  Ligar", key="btn_ligar", use_container_width=True, type="primary"):
-            st.session_state.call_state = "ringing"
-            st.rerun()
+    # CSS centraliza o botão sem depender de columns (funciona em qualquer largura)
+    st.markdown("""
+    <style>
+    div[data-testid="stButton"]:has(button[kind="primary"]) {
+        display: flex; justify-content: center;
+    }
+    div[data-testid="stButton"]:has(button[kind="primary"]) button {
+        width: 160px !important;
+        border-radius: 36px !important;
+        background: #22c55e !important;
+        border-color: #22c55e !important;
+        font-size: 1rem !important;
+        padding: 12px 0 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    if st.button("📞  Ligar", key="btn_ligar", type="primary"):
+        st.session_state.call_state = "ringing"
+        st.rerun()
 
     st.markdown('<div class="home-indicator"></div>', unsafe_allow_html=True)
 
@@ -774,8 +797,8 @@ elif st.session_state.call_state == "ringing":
     st.markdown(_ios_statusbar(), unsafe_allow_html=True)
 
     avatar_ring = (
-        f'<img src="{CLARINHA_PHOTO}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" alt="Clarinha"/>'
-        if HAS_PHOTO else "👩‍💼"
+        f'<img src="{_PHOTO_URI}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" alt="Clarinha"/>'
+        if (HAS_PHOTO and _PHOTO_URI) else "👩‍💼"
     )
 
     st.markdown(f"""
