@@ -199,10 +199,10 @@ st.markdown("""
 
 /* ── TELA IDLE ─────────────────────────────────────── */
 .idle-screen {
-    padding: 16px 24px 24px;
+    padding: 16px 24px 0;
     text-align: center;
     color: #fff;
-    min-height: 720px;
+    min-height: 560px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -758,15 +758,14 @@ if st.session_state.call_state == "idle":
     </div>
 
     <style>
-    /* Reposiciona o stButton sobre o idle-screen, centralizado na parte inferior */
-    section[data-testid="stMain"] div[data-testid="stButton"] {{
-      position: fixed !important;
-      bottom: 72px !important;
-      left: 50% !important;
-      transform: translateX(-50%) !important;
-      z-index: 9999 !important;
+    /* Centraliza o st.button nativo dentro do frame do iPhone */
+    div[data-testid="stButton"] {{
+      display: flex !important;
+      justify-content: center !important;
+      margin-top: 8px !important;
+      margin-bottom: 8px !important;
     }}
-    section[data-testid="stMain"] div[data-testid="stButton"] > button {{
+    div[data-testid="stButton"] > button {{
       width: 200px !important;
       border-radius: 40px !important;
       background: linear-gradient(135deg,#22c55e,#16a34a) !important;
@@ -779,7 +778,7 @@ if st.session_state.call_state == "idle":
       letter-spacing: .04em !important;
       box-shadow: 0 6px 28px rgba(34,197,94,.55) !important;
     }}
-    section[data-testid="stMain"] div[data-testid="stButton"] > button:hover {{
+    div[data-testid="stButton"] > button:hover {{
       background: linear-gradient(135deg,#16a34a,#15803d) !important;
       box-shadow: 0 8px 32px rgba(34,197,94,.7) !important;
     }}
