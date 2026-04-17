@@ -10,6 +10,10 @@ import base64
 import time
 import requests
 import os
+import io
+import struct
+import math
+import wave as wave_mod
 from streamlit_mic_recorder import mic_recorder
 from contexto import SYSTEM_PROMPT, SAUDACAO_INICIAL, RESPOSTA_TRANSFERENCIA, NOME_ASSISTENTE
 from guardrails import classificar_input, deve_transferir_humano, sanitizar_resposta
@@ -28,6 +32,40 @@ st.set_page_config(
 NUMERO_CLARO   = "0800 738 0001"
 CLARINHA_PHOTO = "img/clarinha.png"
 HAS_PHOTO      = os.path.exists(CLARINHA_PHOTO)
+
+# ── Ring tone WAV gerado em Python (não depende de Web Audio API) ──────────
+# Usa a mesma abordagem de <audio autoplay> que já funciona no TTS.
+def _gerar_ring_b64() -> str:
+    """Dois toques de telefone (440 + 480 Hz) → WAV → base64."""
+    sr = 22050
+    frames: list[bytes] = []
+
+    def _tone(dur: float, vol: float = 0.30):
+        n = int(sr * dur)
+        for i in range(n):
+            t = i / sr
+            fade = min(t / 0.05, 1.0, (dur - t) / 0.05)
+            s = fade * vol * (math.sin(2 * math.pi * 440 * t) +
+                              math.sin(2 * math.pi * 480 * t)) / 2
+            frames.append(struct.pack('<h', max(-32767, min(32767, int(s * 32767)))))
+
+    def _sil(dur: float):
+        frames.extend([b'\x00\x00'] * int(sr * dur))
+
+    _tone(1.0)   # 1.º toque
+    _sil(1.2)    # pausa
+    _tone(1.0)   # 2.º toque
+    _sil(0.3)    # silêncio final
+
+    buf = io.BytesIO()
+    with wave_mod.open(buf, 'wb') as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(b''.join(frames))
+    return base64.b64encode(buf.getvalue()).decode()
+
+_RING_B64 = _gerar_ring_b64()   # gerado 1× no startup
 
 # Pré-carrega a foto como base64 para funcionar no Streamlit Cloud
 # (st.markdown com <img src="path"> não acessa o filesystem do servidor)
@@ -451,66 +489,12 @@ div[data-testid="stButton"] button {
 # ─────────────────────────────────────────────────────
 st.markdown("""
 <script>
-// ── Ring tone ─────────────────────────────────────────
-window._clarinha_ring = function(onDone) {
-    try {
-        var ctx = new (window.AudioContext || window.webkitAudioContext)();
-        function playRing(startAt) {
-            [440, 480].forEach(function(freq) {
-                var osc  = ctx.createOscillator();
-                var gain = ctx.createGain();
-                osc.connect(gain);
-                gain.connect(ctx.destination);
-                osc.type = 'sine';
-                osc.frequency.value = freq;
-                gain.gain.setValueAtTime(0, startAt);
-                gain.gain.linearRampToValueAtTime(0.25, startAt + 0.08);
-                gain.gain.setValueAtTime(0.25, startAt + 0.85);
-                gain.gain.linearRampToValueAtTime(0, startAt + 1.0);
-                osc.start(startAt);
-                osc.stop(startAt + 1.1);
-            });
-        }
-        playRing(ctx.currentTime + 0.1);
-        playRing(ctx.currentTime + 2.3);
-        setTimeout(function() {
-            try { ctx.close(); } catch(e) {}
-            if (onDone) onDone();
-        }, 5000);
-    } catch(e) {
-        if (onDone) setTimeout(onDone, 5000);
-    }
-};
-
-// ── Ambient (pink noise) ─────────────────────────────
-window._ambientStarted = false;
-window._clarinha_ambient = function() {
-    if (window._ambientStarted) return;
-    window._ambientStarted = true;
-    try {
-        var ctx = new (window.AudioContext || window.webkitAudioContext)();
-        var g = ctx.createGain(); g.gain.value = 0.03; g.connect(ctx.destination);
-        var buf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
-        var d = buf.getChannelData(0);
-        var b=[0,0,0,0,0,0,0];
-        for(var i=0;i<d.length;i++){
-            var w=Math.random()*2-1;
-            b[0]=.99886*b[0]+w*.0555179; b[1]=.99332*b[1]+w*.0750759;
-            b[2]=.96900*b[2]+w*.1538520; b[3]=.86650*b[3]+w*.3104856;
-            b[4]=.55000*b[4]+w*.5329522; b[5]=-.7616*b[5]-w*.0168980;
-            d[i]=(b[0]+b[1]+b[2]+b[3]+b[4]+b[5]+b[6]+w*.5362)/7; b[6]=w*.115926;
-        }
-        var src=ctx.createBufferSource(); src.buffer=buf; src.loop=true;
-        src.connect(g); src.start();
-    } catch(e) {}
-};
-
-// ── TTS controls ────────────────────────────────────
-window._ttsAudio = null;
+// ── TTS controls ─────────────────────────────────────
+window._ttsAudio    = null;
 window._ttsSpeaking = false;
 window._clarinha_stop_tts = function() {
     if (window._ttsAudio) {
-        try { window._ttsAudio.pause(); window._ttsAudio.currentTime=0; } catch(e){}
+        try { window._ttsAudio.pause(); window._ttsAudio.currentTime = 0; } catch(e) {}
         window._ttsAudio = null;
     }
     window._ttsSpeaking = false;
@@ -518,10 +502,10 @@ window._clarinha_stop_tts = function() {
     document.querySelectorAll('.eq').forEach(function(e){ e.classList.remove('on'); });
 };
 
-// Para TTS quando microfone é ativado
+// Para o TTS quando o microfone é ativado
 var _origGUM = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-navigator.mediaDevices.getUserMedia = async function(c){
-    if(c && c.audio) window._clarinha_stop_tts();
+navigator.mediaDevices.getUserMedia = async function(c) {
+    if (c && c.audio) window._clarinha_stop_tts();
     return _origGUM(c);
 };
 </script>
@@ -758,39 +742,45 @@ if st.session_state.call_state == "idle":
     else:
         avatar_idle = "👩‍💼"
 
+    # Tela idle: foto + nome + número — sem botões decorativos
     st.markdown(f"""
     <div class="idle-screen">
-      <div style="text-align:center; padding-top: 20px;">
+      <div style="text-align:center; padding-top:24px;">
         <div class="phone-contact-avatar">{avatar_idle}</div>
         <div class="phone-contact-name">{NOME_ASSISTENTE}</div>
         <div style="color:rgba(255,255,255,.5);font-size:.85rem;margin-top:4px;">Claro Pós-Venda</div>
-        <div class="phone-number-display" style="margin-top:16px;">{NUMERO_CLARO}</div>
+        <div class="phone-number-display" style="margin-top:20px;">{NUMERO_CLARO}</div>
       </div>
     </div>
-    """, unsafe_allow_html=True)
 
-    # Botão Ligar — centralizado, estilo iOS call button
-    st.markdown("""
     <style>
-    /* Centraliza e estiliza o botão Ligar em qualquer largura */
-    div[data-testid="stButton"] {
+    /* Botão Ligar: centralizado e estilizado como iOS call button */
+    div[data-testid="stButton"] {{
         display: flex !important;
         justify-content: center !important;
-    }
-    div[data-testid="stButton"] button[kind="primary"] {
-        width: 180px !important;
+        margin-top: 32px !important;
+    }}
+    div[data-testid="stButton"] button {{
+        width: 200px !important;
         border-radius: 40px !important;
         background: #22c55e !important;
-        border-color: #22c55e !important;
-        font-size: 1.05rem !important;
+        border: none !important;
+        color: #fff !important;
+        font-size: 1.1rem !important;
         font-weight: 700 !important;
-        padding: 14px 0 !important;
-        letter-spacing: .03em !important;
-        box-shadow: 0 4px 24px rgba(34,197,94,.45) !important;
-    }
+        padding: 16px 0 !important;
+        letter-spacing: .04em !important;
+        box-shadow: 0 6px 28px rgba(34,197,94,.5) !important;
+        transition: transform .12s !important;
+    }}
+    div[data-testid="stButton"] button:hover {{
+        transform: scale(1.04) !important;
+        background: #16a34a !important;
+    }}
     </style>
     """, unsafe_allow_html=True)
-    if st.button("📞  Ligar", key="btn_ligar", type="primary"):
+
+    if st.button("📞  Ligar", key="btn_ligar"):
         st.session_state.call_state = "ringing"
         st.session_state.ring_count += 1   # chave única → ring sempre toca
         st.rerun()
@@ -816,6 +806,9 @@ elif st.session_state.call_state == "ringing":
 
     _rc = st.session_state.ring_count   # chave única por chamada
 
+    # ── Ring tone: <audio autoplay> com WAV gerado em Python ──────────────
+    # Funciona exatamente como o TTS — não depende de Web Audio API.
+    # sessionStorage impede que o ring toque de novo nos rerenders do Streamlit.
     st.markdown(f"""
     <div class="ringing-screen">
       <div>
@@ -827,55 +820,28 @@ elif st.session_state.call_state == "ringing":
       </div>
     </div>
 
-    <script>
-    (function() {{
-        // Chave única por chamada — garante que o ring toca sempre que usuário apertar Ligar
-        var ringKey = 'ring_{_rc}';
-        if (sessionStorage.getItem(ringKey)) return;
-        sessionStorage.setItem(ringKey, '1');
-
-        // Ring tone auto-contido (não depende de função global)
-        function playRing(onDone) {{
-            try {{
-                var ctx = new (window.AudioContext || window.webkitAudioContext)();
-                function tone(startAt) {{
-                    [440, 480].forEach(function(freq) {{
-                        var osc  = ctx.createOscillator();
-                        var gain = ctx.createGain();
-                        osc.connect(gain); gain.connect(ctx.destination);
-                        osc.type = 'sine'; osc.frequency.value = freq;
-                        gain.gain.setValueAtTime(0, startAt);
-                        gain.gain.linearRampToValueAtTime(0.28, startAt + 0.08);
-                        gain.gain.setValueAtTime(0.28, startAt + 0.85);
-                        gain.gain.linearRampToValueAtTime(0, startAt + 1.0);
-                        osc.start(startAt); osc.stop(startAt + 1.1);
-                    }});
-                }}
-                tone(ctx.currentTime + 0.1);
-                tone(ctx.currentTime + 2.3);
-                setTimeout(function() {{
-                    try {{ ctx.close(); }} catch(e) {{}}
-                    if (onDone) onDone();
-                }}, 5000);
-            }} catch(e) {{
-                if (onDone) setTimeout(onDone, 5000);
-            }}
+    <!-- Ring tone WAV — autoplay após gesto do usuário (clique em Ligar) -->
+    <audio id="ring-{_rc}"
+      onended="
+        var t=0;
+        function go(){{
+          var bs=document.querySelectorAll('button');
+          for(var i=0;i<bs.length;i++){{
+            if(bs[i].textContent.trim().includes('Atender')){{bs[i].click();return;}}
+          }}
+          if(++t<40) setTimeout(go,200);
         }}
-
-        playRing(function() {{
-            // Após os 2 toques: auto-clica "Atender"
-            var tries = 0;
-            function clickAtender() {{
-                var btns = document.querySelectorAll('button');
-                for (var i = 0; i < btns.length; i++) {{
-                    if (btns[i].textContent.includes('Atender')) {{
-                        btns[i].click(); return;
-                    }}
-                }}
-                if (++tries < 30) setTimeout(clickAtender, 200);
-            }}
-            clickAtender();
-        }});
+        go();
+      ">
+      <source src="data:audio/wav;base64,{_RING_B64}" type="audio/wav">
+    </audio>
+    <script>
+    (function(){{
+      var k='rp_{_rc}';
+      if(sessionStorage.getItem(k)) return;
+      sessionStorage.setItem(k,'1');
+      var a=document.getElementById('ring-{_rc}');
+      if(a) a.play().catch(function(){{}});
     }})();
     </script>
     """, unsafe_allow_html=True)
