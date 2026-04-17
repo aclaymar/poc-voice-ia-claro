@@ -746,74 +746,61 @@ if st.session_state.call_state == "idle":
     # O botão Ligar é HTML puro DENTRO do idle-screen (que é flex-column
     # com align-items:center). Isso garante centralização real sem depender
     # de CSS do Streamlit. O onclick toca o ring e clica o botão oculto Python.
+    # HTML limpo — JS separado em <script> para não quebrar o parser
     st.markdown(f"""
-    <!-- Ring tone pré-carregado para play() rápido no onclick -->
     <audio id="ring-idle" preload="auto">
       <source src="data:audio/wav;base64,{_RING_B64}" type="audio/wav">
     </audio>
 
     <div class="idle-screen">
-      <!-- Conteúdo superior -->
-      <div style="text-align:center; padding-top:24px;">
+      <div style="text-align:center;padding-top:24px;">
         <div class="phone-contact-avatar">{avatar_idle}</div>
         <div class="phone-contact-name">{NOME_ASSISTENTE}</div>
         <div style="color:rgba(255,255,255,.5);font-size:.85rem;margin-top:4px;">Claro Pós-Venda</div>
         <div class="phone-number-display" style="margin-top:20px;">{NUMERO_CLARO}</div>
       </div>
-
-      <!-- Espaçador empurra o botão para o fundo -->
-      <div style="flex:1;"></div>
-
-      <!-- Botão Ligar HTML puro: centralizado pelo flexbox do idle-screen -->
-      <button id="btn-ligar-html"
-        style="
-          width:200px; border-radius:40px; background:#22c55e; border:none;
-          color:#fff; font-size:1.1rem; font-weight:700; padding:14px 0;
-          cursor:pointer; letter-spacing:.04em; margin-bottom:60px;
-          box-shadow:0 6px 28px rgba(34,197,94,.5);
-          transition: transform .12s, box-shadow .12s;
-        "
-        onmouseover="this.style.background='#16a34a'"
-        onmouseout="this.style.background='#22c55e'"
-        onclick="
-          // 1. Toca ring imediatamente — dentro do contexto de gesto (onclick)
-          var a = document.getElementById('ring-idle');
-          if (a) {{ a.currentTime = 0; a.play().catch(function(){{}}); }}
-
-          // Ao terminar o ring: auto-clica Atender
-          if (a) a.onended = function() {{
-            var t = 0;
-            function go() {{
-              var bs = document.querySelectorAll('button');
-              for (var i=0; i<bs.length; i++)
-                if (bs[i].textContent.trim().includes('Atender')) {{ bs[i].click(); return; }}
-              if (++t < 40) setTimeout(go, 200);
-            }}
-            go();
-          }};
-
-          // 2. Clica o botão Streamlit oculto para mudar estado Python
-          setTimeout(function() {{
-            var bs = document.querySelectorAll('button');
-            for (var i=0; i<bs.length; i++)
-              if (bs[i].textContent.trim() === '▶ligar') {{ bs[i].click(); return; }}
-          }}, 150);
-        ">
-        📞&nbsp;&nbsp;Ligar
+      <div style="flex:1;min-height:40px;"></div>
+      <button id="btn-ligar-html" style="width:200px;border-radius:40px;background:#22c55e;border:none;color:#fff;font-size:1.1rem;font-weight:700;padding:14px 0;cursor:pointer;letter-spacing:.04em;margin-bottom:60px;box-shadow:0 6px 28px rgba(34,197,94,.5);">
+        📞&#160;&#160;Ligar
       </button>
     </div>
 
-    <!-- Oculta o botão Streamlit (só existe para disparar rerun no Python) -->
     <style>
     div[data-testid="stButton"] {{
-      position: fixed !important;
-      top: -999px !important;
-      left: -999px !important;
-      opacity: 0 !important;
-      pointer-events: none !important;
-      width: 1px !important; height: 1px !important;
+      position:fixed!important;top:-9999px!important;left:-9999px!important;
+      opacity:0!important;width:1px!important;height:1px!important;
     }}
     </style>
+
+    <script>
+    (function() {{
+      var btn = document.getElementById('btn-ligar-html');
+      if (!btn || btn._hooked) return;
+      btn._hooked = true;
+      btn.addEventListener('click', function() {{
+        var a = document.getElementById('ring-idle');
+        if (a) {{
+          a.currentTime = 0;
+          a.play().catch(function(){{}});
+          a.onended = function() {{
+            var t = 0;
+            function clickAtender() {{
+              var bs = document.querySelectorAll('button');
+              for (var i = 0; i < bs.length; i++)
+                if (bs[i].textContent.trim().indexOf('Atender') >= 0) {{ bs[i].click(); return; }}
+              if (++t < 40) setTimeout(clickAtender, 200);
+            }}
+            clickAtender();
+          }};
+        }}
+        setTimeout(function() {{
+          var bs = document.querySelectorAll('button');
+          for (var i = 0; i < bs.length; i++)
+            if (bs[i].textContent.trim() === '\u25b6ligar') {{ bs[i].click(); return; }}
+        }}, 150);
+      }});
+    }})();
+    </script>
     """, unsafe_allow_html=True)
 
     # Botão Python oculto — só captura o clique do JS acima para mudar estado
