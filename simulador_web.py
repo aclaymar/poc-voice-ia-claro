@@ -754,33 +754,36 @@ if st.session_state.call_state == "idle":
     </div>
 
     <style>
-    /* Botão Ligar: fixado no centro-inferior do frame do iPhone */
-    div[data-testid="stButton"],
-    div[data-testid="stButton"] > div {{
-        width: 100% !important;
-        display: flex !important;
-        justify-content: center !important;
-        align-items: center !important;
-        margin-top: 40px !important;
+    /*
+     * Botão Ligar — position:absolute dentro do .block-container (position:relative).
+     * É o único método confiável: o Streamlit renderiza stButton com inline-flex,
+     * então width/flex no container não funcionam. Absoluto + translateX centra sempre.
+     */
+    div[data-testid="stButton"] {{
+        position: absolute !important;
+        bottom: 55px !important;
+        left: 50% !important;
+        transform: translateX(-50%) !important;
+        z-index: 20 !important;
+        width: auto !important;
+        margin: 0 !important;
     }}
     div[data-testid="stButton"] button {{
         width: 200px !important;
-        min-width: 200px !important;
         border-radius: 40px !important;
         background: #22c55e !important;
         border: none !important;
         color: #fff !important;
         font-size: 1.1rem !important;
         font-weight: 700 !important;
-        padding: 16px 0 !important;
+        padding: 14px 0 !important;
         letter-spacing: .04em !important;
         box-shadow: 0 6px 28px rgba(34,197,94,.5) !important;
-        transition: transform .12s !important;
-        margin: 0 auto !important;
+        white-space: nowrap !important;
     }}
     div[data-testid="stButton"] button:hover {{
-        transform: scale(1.04) !important;
         background: #16a34a !important;
+        box-shadow: 0 8px 32px rgba(34,197,94,.65) !important;
     }}
     </style>
     """, unsafe_allow_html=True)
