@@ -754,14 +754,18 @@ if st.session_state.call_state == "idle":
     </div>
 
     <style>
-    /* Botão Ligar: centralizado e estilizado como iOS call button */
-    div[data-testid="stButton"] {{
+    /* Botão Ligar: fixado no centro-inferior do frame do iPhone */
+    div[data-testid="stButton"],
+    div[data-testid="stButton"] > div {{
+        width: 100% !important;
         display: flex !important;
         justify-content: center !important;
-        margin-top: 32px !important;
+        align-items: center !important;
+        margin-top: 40px !important;
     }}
     div[data-testid="stButton"] button {{
         width: 200px !important;
+        min-width: 200px !important;
         border-radius: 40px !important;
         background: #22c55e !important;
         border: none !important;
@@ -772,6 +776,7 @@ if st.session_state.call_state == "idle":
         letter-spacing: .04em !important;
         box-shadow: 0 6px 28px rgba(34,197,94,.5) !important;
         transition: transform .12s !important;
+        margin: 0 auto !important;
     }}
     div[data-testid="stButton"] button:hover {{
         transform: scale(1.04) !important;
