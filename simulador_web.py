@@ -794,9 +794,8 @@ if st.session_state.call_state == "idle":
           }};
         }}
         setTimeout(function() {{
-          var bs = document.querySelectorAll('button');
-          for (var i = 0; i < bs.length; i++)
-            if (bs[i].textContent.trim() === '\u25b6ligar') {{ bs[i].click(); return; }}
+          var hb = document.querySelector('div[data-testid="stButton"] button');
+          if (hb) hb.click();
         }}, 150);
       }});
     }})();
