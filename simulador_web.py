@@ -743,16 +743,11 @@ if st.session_state.call_state == "idle":
         avatar_idle = "👩‍💼"
 
     # ── Tela idle ─────────────────────────────────────────────────────────────
-    # O botão Ligar é HTML puro DENTRO do idle-screen (que é flex-column
-    # com align-items:center). Isso garante centralização real sem depender
-    # de CSS do Streamlit. O onclick toca o ring e clica o botão oculto Python.
-    # HTML limpo — JS separado em <script> para não quebrar o parser
+    # Usamos st.button nativo (sem hacks de JS/querySelector) — é mais confiável.
+    # O ring toca no estado ringing (que já tem <audio autoplay>).
+    # CSS posiciona e estiliza o botão para parecer um botão de phone call.
     st.markdown(f"""
-    <audio id="ring-idle" preload="auto">
-      <source src="data:audio/wav;base64,{_RING_B64}" type="audio/wav">
-    </audio>
-
-    <div class="idle-screen">
+    <div class="idle-screen" id="idle-screen-wrap">
       <div style="text-align:center;padding-top:24px;">
         <div class="phone-contact-avatar">{avatar_idle}</div>
         <div class="phone-contact-name">{NOME_ASSISTENTE}</div>
@@ -760,50 +755,39 @@ if st.session_state.call_state == "idle":
         <div class="phone-number-display" style="margin-top:20px;">{NUMERO_CLARO}</div>
       </div>
       <div style="flex:1;min-height:40px;"></div>
-      <button id="btn-ligar-html" style="width:200px;border-radius:40px;background:#22c55e;border:none;color:#fff;font-size:1.1rem;font-weight:700;padding:14px 0;cursor:pointer;letter-spacing:.04em;margin-bottom:60px;box-shadow:0 6px 28px rgba(34,197,94,.5);">
-        📞&#160;&#160;Ligar
-      </button>
     </div>
 
     <style>
-    div[data-testid="stButton"] {{
-      position:fixed!important;top:-9999px!important;left:-9999px!important;
-      opacity:0!important;width:1px!important;height:1px!important;
+    /* Reposiciona o stButton sobre o idle-screen, centralizado na parte inferior */
+    section[data-testid="stMain"] div[data-testid="stButton"] {{
+      position: fixed !important;
+      bottom: 72px !important;
+      left: 50% !important;
+      transform: translateX(-50%) !important;
+      z-index: 9999 !important;
+    }}
+    section[data-testid="stMain"] div[data-testid="stButton"] > button {{
+      width: 200px !important;
+      border-radius: 40px !important;
+      background: linear-gradient(135deg,#22c55e,#16a34a) !important;
+      color: #fff !important;
+      font-size: 1.15rem !important;
+      font-weight: 700 !important;
+      padding: 14px 0 !important;
+      border: none !important;
+      cursor: pointer !important;
+      letter-spacing: .04em !important;
+      box-shadow: 0 6px 28px rgba(34,197,94,.55) !important;
+    }}
+    section[data-testid="stMain"] div[data-testid="stButton"] > button:hover {{
+      background: linear-gradient(135deg,#16a34a,#15803d) !important;
+      box-shadow: 0 8px 32px rgba(34,197,94,.7) !important;
     }}
     </style>
-
-    <script>
-    (function() {{
-      var btn = document.getElementById('btn-ligar-html');
-      if (!btn || btn._hooked) return;
-      btn._hooked = true;
-      btn.addEventListener('click', function() {{
-        var a = document.getElementById('ring-idle');
-        if (a) {{
-          a.currentTime = 0;
-          a.play().catch(function(){{}});
-          a.onended = function() {{
-            var t = 0;
-            function clickAtender() {{
-              var bs = document.querySelectorAll('button');
-              for (var i = 0; i < bs.length; i++)
-                if (bs[i].textContent.trim().indexOf('Atender') >= 0) {{ bs[i].click(); return; }}
-              if (++t < 40) setTimeout(clickAtender, 200);
-            }}
-            clickAtender();
-          }};
-        }}
-        setTimeout(function() {{
-          var hb = document.querySelector('div[data-testid="stButton"] button');
-          if (hb) hb.click();
-        }}, 150);
-      }});
-    }})();
-    </script>
     """, unsafe_allow_html=True)
 
-    # Botão Python oculto — só captura o clique do JS acima para mudar estado
-    if st.button("▶ligar", key="btn_ligar"):
+    # Botão nativo Streamlit — clique direto, sem intermediação de JS
+    if st.button("📞  Ligar", key="btn_ligar"):
         st.session_state.call_state = "ringing"
         st.session_state.ring_count += 1
         st.rerun()
